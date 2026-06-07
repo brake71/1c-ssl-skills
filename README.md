@@ -34,7 +34,7 @@
 Клонировать и подключить нужные скилы к проекту:
 
 ```bash
-git clone https://github.com/<owner>/bsp-docs.git
+git clone https://github.com/brake71/1c-ssl-skills.git
 cp -r bsp-docs/.claude/skills/bsp-fundamentals .claude/skills/
 cp -r bsp-docs/.claude/skills/bsp-base-common  .claude/skills/
 ```
