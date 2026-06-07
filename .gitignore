@@ -1,0 +1,18 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp
+*.swo
+
+# Temp
+*.tmp
+*.bak
+
+src/
+.claude/skills/prompt-crafting-guide/
+bsp321_md/
+bsp3111_md/
+.claude/skills/opencode-runner/
