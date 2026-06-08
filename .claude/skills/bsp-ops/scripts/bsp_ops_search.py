@@ -236,17 +236,19 @@ def cmd_detect(args):
 
 
 def main():
+    parent = argparse.ArgumentParser(add_help=False)
+    parent.add_argument("--src", help="Path to configuration export root (auto-detected if omitted)")
+
     parser = argparse.ArgumentParser(description="BSP Operations module/method search")
-    parser.add_argument("--src", help="Path to configuration export root (auto-detected if omitted)")
     sub = parser.add_subparsers(dest="command")
 
-    p_method = sub.add_parser("method", help="Find module containing export method")
+    p_method = sub.add_parser("method", parents=[parent], help="Find module containing export method")
     p_method.add_argument("name", help="Method name (e.g. ТекущийПользователь)")
-    p_module = sub.add_parser("module", help="Show module path and stable API methods")
+    p_module = sub.add_parser("module", parents=[parent], help="Show module path and stable API methods")
     p_module.add_argument("name", help="Module name (e.g. Пользователи)")
-    p_subsys = sub.add_parser("modules-by-subsystem", help="List ops modules in subsystem")
+    p_subsys = sub.add_parser("modules-by-subsystem", parents=[parent], help="List ops modules in subsystem")
     p_subsys.add_argument("name", help="Subsystem name (e.g. Пользователи)")
-    sub.add_parser("detect", help="Detect BSP version and module count")
+    sub.add_parser("detect", parents=[parent], help="Detect BSP version and module count")
 
     args = parser.parse_args()
     if args.command == "method":
