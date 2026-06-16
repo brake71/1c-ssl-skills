@@ -1,0 +1,31 @@
+name: Release BSP Skills
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack BSP skills
+        run: |
+          ARCHIVE_NAME="bsp-skills-${{ github.ref_name }}.zip"
+          zip -r "$ARCHIVE_NAME" \
+            .claude/skills/bsp-core \
+            .claude/skills/bsp-data \
+            .claude/skills/bsp-ops \
+            .claude/skills/bsp-ui-forms
+          echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.archive_name }}
+          generate_release_notes: true
