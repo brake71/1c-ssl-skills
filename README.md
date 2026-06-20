@@ -80,6 +80,47 @@ BSP-скилы — 4 кластерных umbrella + leaf-скилы в `referen
 | `bsp-ui-forms`            | Подключаемые команды, печать, свойства форм, мультиязычность, файлы/версии, дубли                                             | `bsp-commands-external`, `bsp-print-reports`, `bsp-forms-validation`, `bsp-multilang`, `bsp-files-and-versions`, `bsp-report-dedup` |
 | `bsp-ops`                 | Пользователи/доступ, почта/SMS, бизнес-процессы, администрирование, резервное копирование, мониторинг, ПДн | `bsp-users-access`, `bsp-comms`, `bsp-bp-tasks`, `bsp-admin-tools`, `bsp-backup`, `bsp-perf-monitoring`, `bsp-protection-pd`        |
 
+## Инструменты разработчика
+
+### Скрипты поиска по исходникам БСП
+
+Каждый кластер содержит скрипт для поиска методов и модулей в выгрузке
+конфигурации 1С (`src/cf/`). Скрипт парсит `.bsl`-файлы, определяет
+`#Область ПрограммныйИнтерфейс` и находит экспортные методы — включая
+многострочные сигнатуры (когда `Экспорт` на отдельной строке).
+
+```bash
+python .claude/skills/bsp-core/scripts/bsp_core_search.py method СообщитьПользователю --src src/cf
+python .claude/skills/bsp-core/scripts/bsp_core_search.py module ОбщегоНазначения --src src/cf
+python .claude/skills/bsp-core/scripts/bsp_core_search.py modules-by-subsystem БазоваяФункциональность --src src/cf
+python .claude/skills/bsp-core/scripts/bsp_core_search.py detect --src src/cf
+```
+
+`--src <path>` — **обязательный** параметр: путь к корню выгрузки конфигурации
+(каталог с `CommonModules/`). Авто-детект отключён намеренно: агент должен
+передавать путь явно. Вывод принудительно в UTF-8 (для Windows-консоли).
+
+### CI-валидатор таблиц key-methods
+
+`ci/validate_key_methods.py` сверяет все таблицы методов в `references/*.md`
+с реальным кодом БСП. Для каждой записи `Модуль.Метод` + заявленной
+стабильности (✅ стабильный / ⚠️ служебный) валидатор:
+
+1. Находит модуль в `src/cf/CommonModules/`.
+2. Парсит `.bsl` тем же парсером, что и скрипты поиска.
+3. Проверяет: существует ли метод, соответствует ли регион заявленной
+   стабильности (метод может быть заявлен как «стабильный», но лежать в
+   `СлужебныеПроцедурыИФункции` — это ошибка).
+
+```bash
+python ci/validate_key_methods.py --src src/cf
+python ci/validate_key_methods.py --src src/cf --strict   # INFO как ошибки
+```
+
+GitHub Actions workflow `.github/workflows/validate-skills.yml` проверяет,
+что скрипты компилируются и `--src` обязателен. Полная валидация таблиц
+требует `src/cf/` (в `.gitignore`), поэтому выполняется локально перед коммитом.
+
 ## Лицензия
 
 [MIT](LICENSE). Copyright (c) 2026 Чекменев Дмитрий Алексеевич.

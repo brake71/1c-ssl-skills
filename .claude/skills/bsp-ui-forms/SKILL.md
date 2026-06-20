@@ -61,18 +61,48 @@ Determine the leaf skill by trigger words (first match wins):
 | bsp-multilang | references/bsp-multilang.md | Multilingual attributes, translations |
 | bsp-report-dedup | references/bsp-report-dedup.md | Duplicate search, merge, bulk edit |
 
+## Cross-cluster routing
+
+UI/forms subsystems overlap with other clusters:
+
+| Trigger | Go to |
+|---------|-------|
+| sign a printed form with ЭП, attach file to exchange message | `bsp-data` |
+| user who owns the print command, access to external report, RLS on file | `bsp-ops` |
+| safe storage of report credentials, message-to-user from a print handler, common serialization | `bsp-core` → `bsp-base-common` |
+| run heavy print / report generation in background (`ДлительныеОперации`) | `bsp-core` → `bsp-longs-and-jobs` |
+
+**Ambiguous keywords** (first match wins, but consider both clusters):
+
+- `Файл` (file) in a *versioning* context → stay here (`bsp-files-and-versions`).
+  `Файл` in an *exchange attachment* context → `bsp-data` → `bsp-data-exchange`.
+  `Файл` in a *user-attached* context (avatar, signature scan) → check
+  `bsp-ops` → `bsp-users-access` or stay, depending on which module owns it.
+- `Команда` (command) connected-command context → stay here
+  (`bsp-commands-external`). `Команда` in a `РегламентныеЗадания` context →
+  `bsp-core` → `bsp-longs-and-jobs`. Different concepts despite the word.
+- `Версия` (version) of an object → stay here (`bsp-files-and-versions`).
+  `Версия` of the configuration / infobase → `bsp-core` → `bsp-update`.
+- `Свойства` (properties) form-property context → stay here
+  (`bsp-forms-validation`). `Свойства` of a contact info / address →
+  `bsp-data` → `bsp-contact-info`.
+
+If no trigger matches, fall back to `bsp-fundamentals` and locate the
+subsystem by the module map.
+
 ## Search tools
 
 Use `scripts/bsp_ui_search.py` to look up methods and modules
 in the target repository's configuration export:
 
 ```bash
-python scripts/bsp_ui_search.py method ДобавитьКомандыПечати [--src <path>]
-python scripts/bsp_ui_search.py module УправлениеПечатью [--src <path>]
-python scripts/bsp_ui_search.py modules-by-subsystem Печать [--src <path>]
-python scripts/bsp_ui_search.py detect [--src <path>]
+python scripts/bsp_ui_search.py method СоздатьКоллекциюКомандПечати --src <path/to/cf>
+python scripts/bsp_ui_search.py module УправлениеПечатью --src <path/to/cf>
+python scripts/bsp_ui_search.py modules-by-subsystem Печать --src <path/to/cf>
+python scripts/bsp_ui_search.py detect --src <path/to/cf>
 ```
 
-If `--src` is omitted, the script auto-detects the configuration
-export root by searching upward for a directory containing `CommonModules/`.
-If multiple candidates found, it prints them to stderr and exits with code 1.
+`--src <path>` is **required**: path to the configuration export root
+(directory containing `CommonModules/`). No auto-detection — the agent
+must pass the path explicitly. If the path is invalid or has no
+`CommonModules/` subdir, the script exits with a non-zero code.

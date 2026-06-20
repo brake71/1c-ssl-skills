@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """BSP Operations search: lookup methods/modules in 1C configuration export.
 
 Covers modules: Пользователи*, УправлениеДоступом*, РаботаСПочтовымиСообщениями*,
@@ -10,11 +11,19 @@ and corresponding subsystem modules.
 """
 
 import argparse
-import os
 import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+# Force UTF-8 output on Windows console (otherwise Cyrillic -> mojibake)
+for _stream in (sys.stdout, sys.stderr):
+    _reconf = getattr(_stream, "reconfigure", None)
+    if _reconf is not None:
+        try:
+            _reconf(encoding="utf-8")
+        except (TypeError, ValueError):
+            pass
 
 MODULE_PREFIXES = [
     "Пользователи",
@@ -27,6 +36,7 @@ MODULE_PREFIXES = [
     "Взаимодействия",
     "БизнесПроцессыИЗадачи",
     "ЗавершениеРаботыПользователей",
+    "СоединенияИБ",
     "УдалениеПомеченныхОбъектов",
     "РезервноеКопированиеИБ",
     "ОценкаПроизводительности",
@@ -45,6 +55,7 @@ BSP_SUBSYSTEMS = [
     "Взаимодействия",
     "БизнесПроцессыИЗадачи",
     "ЗавершениеРаботыПользователей",
+    "СоединенияИБ",
     "УдалениеПомеченныхОбъектов",
     "РезервноеКопированиеИБ",
     "ОценкаПроизводительности",
@@ -53,42 +64,21 @@ BSP_SUBSYSTEMS = [
 ]
 
 
-def auto_detect_src(start_path="."):
-    p = Path(start_path).resolve()
-    while True:
-        if (p / "CommonModules").is_dir():
-            return str(p)
-        parent = p.parent
-        if parent == p:
-            break
-        p = parent
-    return None
-
-
 def find_src_or_exit(src_arg):
-    if src_arg:
-        if not Path(src_arg).is_dir():
-            print(f"Error: --src path does not exist: {src_arg}", file=sys.stderr)
-            sys.exit(1)
-        return src_arg
-    detected = auto_detect_src()
-    if detected:
-        return detected
-    candidates = []
-    for root, dirs, _ in os.walk("."):
-        if "CommonModules" in dirs:
-            candidates.append(root)
-            dirs.remove("CommonModules")
-    if len(candidates) == 1:
-        return candidates[0]
-    if len(candidates) > 1:
-        print("Multiple configuration export roots found:", file=sys.stderr)
-        for c in candidates:
-            print(f"  {c}", file=sys.stderr)
-        print("Use --src <path> to specify.", file=sys.stderr)
+    """Return validated --src path. No auto-detect: caller must pass --src."""
+    if not src_arg:
+        print("Error: --src <path> is required (path to configuration export root).",
+              file=sys.stderr)
+        sys.exit(2)
+    if not Path(src_arg).is_dir():
+        print(f"Error: --src path does not exist: {src_arg}", file=sys.stderr)
         sys.exit(1)
-    print("No configuration export root found. Use --src <path>.", file=sys.stderr)
-    sys.exit(1)
+    cm = Path(src_arg) / "CommonModules"
+    if not cm.is_dir():
+        print(f"Error: --src path has no CommonModules/ subdir: {src_arg}",
+              file=sys.stderr)
+        sys.exit(1)
+    return src_arg
 
 
 def is_relevant_module(module_name):
@@ -108,36 +98,85 @@ def list_common_modules(src):
 
 
 def parse_export_methods(bsl_path, only_stable=True):
+    """Parse .bsl file, return list of (method_name, is_stable, region).
+
+    Two-pass approach:
+    1. First pass: scan region markers with a stack to know the current
+       region label for every line. Nested sub-regions inherit parent stability.
+    2. Second pass: scan `Функция`/`Процедура` declarations, capturing the
+       declaration plus subsequent lines until `Экспорт` or end keyword.
+    """
     if not bsl_path.is_file():
         return []
     text = bsl_path.read_text(encoding="utf-8-sig")
-    methods = []
-    current_region = None
-    in_stable = False
-    for line in text.splitlines():
+    lines = text.splitlines()
+
+    region_labels = [None] * len(lines)
+    stack = []
+    for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("#Область"):
-            region_name = stripped.replace("#Область", "").strip()
-            if region_name == "ПрограммныйИнтерфейс":
-                in_stable = True
-                current_region = "stable"
-            elif region_name == "СлужебныйПрограммныйИнтерфейс":
-                in_stable = False
-                current_region = "unstable"
-            elif region_name == "СлужебныеПроцедурыИФункции":
-                current_region = None
-            elif region_name == "Переопределение":
-                current_region = "override"
+            name = stripped.replace("#Область", "").strip()
+            if name == "ПрограммныйИнтерфейс":
+                stack.append("stable")
+            elif name in ("СлужебныйПрограммныйИнтерфейс",
+                          "СлужебныеПроцедурыИФункции",
+                          "УстаревшиеПроцедурыИФункции"):
+                stack.append("unstable")
+            elif name == "Переопределение":
+                stack.append("override")
+            else:
+                stack.append(stack[-1] if stack else None)
+            region_labels[i] = None
         elif stripped.startswith("#КонецОбласти"):
-            current_region = None
-            in_stable = False
-        elif current_region is not None:
-            m = re.match(r"^(Функция|Процедура)\s+(\w+)\s*\(", stripped)
-            if m and "Экспорт" in stripped:
-                method_name = m.group(2)
-                is_stable = current_region == "stable"
-                if not only_stable or is_stable:
-                    methods.append((method_name, is_stable, current_region))
+            if stack:
+                stack.pop()
+            region_labels[i] = None
+        else:
+            region_labels[i] = stack[-1] if stack else None
+
+    methods = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        stripped = lines[i].strip()
+        if stripped.startswith("#") or not stripped:
+            i += 1
+            continue
+        m = re.match(r"^(Функция|Процедура)\s+(\w+)\s*\(", stripped)
+        if not m:
+            i += 1
+            continue
+        sig_keyword = m.group(1)
+        method_name = m.group(2)
+        end_keyword = "Конец" + sig_keyword
+        region = region_labels[i]
+
+        sig_text = stripped
+        j = i
+        is_export = "Экспорт" in stripped
+        if not is_export:
+            for j2 in range(i + 1, min(i + 30, n)):
+                s2 = lines[j2].strip()
+                if s2 == end_keyword or s2.startswith(end_keyword):
+                    j = j2
+                    break
+                m2 = re.match(r"^(Функция|Процедура)\s+\w+\s*\(", s2)
+                if m2:
+                    is_export = False
+                    j = j2 - 1
+                    break
+                sig_text += "\n" + s2
+                if "Экспорт" in s2:
+                    is_export = True
+                    j = j2
+                    break
+                j = j2
+        if is_export and region is not None:
+            is_stable = region == "stable"
+            if not only_stable or is_stable:
+                methods.append((method_name, is_stable, region))
+        i = j + 1
     return methods
 
 
@@ -237,7 +276,8 @@ def cmd_detect(args):
 
 def main():
     parent = argparse.ArgumentParser(add_help=False)
-    parent.add_argument("--src", help="Path to configuration export root (auto-detected if omitted)")
+    parent.add_argument("--src", required=True,
+                        help="Path to configuration export root (must contain CommonModules/)")
 
     parser = argparse.ArgumentParser(description="BSP Operations module/method search")
     sub = parser.add_subparsers(dest="command")

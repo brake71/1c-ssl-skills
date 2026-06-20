@@ -65,18 +65,48 @@ Determine the leaf skill by trigger words (first match wins):
 | bsp-perf-monitoring | references/bsp-perf-monitoring.md | Performance benchmarks, monitoring |
 | bsp-protection-pd | references/bsp-protection-pd.md | Personal data protection, consent |
 
+## Cross-cluster routing
+
+Ops subsystems overlap with other clusters in several places:
+
+| Trigger | Go to |
+|---------|-------|
+| print a user list / access report, attach file to a task, form property on a user form | `bsp-ui-forms` |
+| exchange user/access data between nodes, sign an access-grant with ЭП | `bsp-data` |
+| safe storage of email/SMS credentials, common message-to-user, serialization of access settings | `bsp-core` → `bsp-base-common` |
+| run heavy backup / deletion / monitoring in background (`ДлительныеОперации`) | `bsp-core` → `bsp-longs-and-jobs` |
+| schedule a backup or deletion job (`РегламентныеЗадания`) | `bsp-core` → `bsp-longs-and-jobs` (for the API), but the *handler* registration stays in `bsp-backup` / `bsp-admin-tools` |
+
+**Ambiguous keywords** (first match wins, but consider both clusters):
+
+- `Задача` (task) in a business-process context → stay here (`bsp-bp-tasks`).
+  `Задача` in a `РегламентныеЗадания` context → `bsp-core` →
+  `bsp-longs-and-jobs`. The two are different: `Задача` is a business-task
+  object, `РегламентноеЗадание` is a scheduled job.
+- `РезервноеКопирование` backup *schedule* is here (`bsp-backup`), but the
+  actual background execution goes through `ДлительныеОперации` /
+  `РегламентныеЗадания` (core). If the task is «configure when backups run»,
+  stay; if it is «the backup job itself is stuck», check core + ops.
+- `УдалениеПомеченныхОбъектов` (here, ops) vs `ПоискИУдалениеДублей`
+  (ui-forms cluster): both delete objects, but dedup is a UI-driven merge,
+  while `УдалениеПомеченных` is a scheduled cleanup. Match by intent.
+
+If no trigger matches, fall back to `bsp-fundamentals` and locate the
+subsystem by the module map.
+
 ## Search tools
 
 Use `scripts/bsp_ops_search.py` to look up methods and modules
 in the target repository's configuration export:
 
 ```bash
-python scripts/bsp_ops_search.py method ТекущийПользователь [--src <path>]
-python scripts/bsp_ops_search.py module Пользователи [--src <path>]
-python scripts/bsp_ops_search.py modules-by-subsystem Пользователи [--src <path>]
-python scripts/bsp_ops_search.py detect [--src <path>]
+python scripts/bsp_ops_search.py method ТекущийПользователь --src <path/to/cf>
+python scripts/bsp_ops_search.py module Пользователи --src <path/to/cf>
+python scripts/bsp_ops_search.py modules-by-subsystem Пользователи --src <path/to/cf>
+python scripts/bsp_ops_search.py detect --src <path/to/cf>
 ```
 
-If `--src` is omitted, the script auto-detects the configuration
-export root by searching upward for a directory containing `CommonModules/`.
-If multiple candidates found, it prints them to stderr and exits with code 1.
+`--src <path>` is **required**: path to the configuration export root
+(directory containing `CommonModules/`). No auto-detection — the agent
+must pass the path explicitly. If the path is invalid or has no
+`CommonModules/` subdir, the script exits with a non-zero code.

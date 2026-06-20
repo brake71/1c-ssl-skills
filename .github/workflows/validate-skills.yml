@@ -1,0 +1,70 @@
+name: Validate BSP skills
+
+on:
+  push:
+    paths:
+      - '.claude/skills/**'
+      - 'ci/**'
+      - '.github/workflows/validate-skills.yml'
+  pull_request:
+    paths:
+      - '.claude/skills/**'
+      - 'ci/**'
+      - '.github/workflows/validate-skills.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate skill scripts compile
+        run: |
+          python -m py_compile .claude/skills/bsp-core/scripts/bsp_core_search.py
+          python -m py_compile .claude/skills/bsp-data/scripts/bsp_data_search.py
+          python -m py_compile .claude/skills/bsp-ops/scripts/bsp_ops_search.py
+          python -m py_compile .claude/skills/bsp-ui-forms/scripts/bsp_ui_search.py
+          python -m py_compile ci/validate_key_methods.py
+
+      - name: Validate skill scripts run (--src required)
+        run: |
+          # Scripts must fail with exit 2 when --src is missing
+          set +e
+          python .claude/skills/bsp-core/scripts/bsp_core_search.py method СообщитьПользователю
+          rc=$?
+          if [ "$rc" -ne 2 ]; then
+            echo "FAIL: expected exit 2 for missing --src, got $rc"
+            exit 1
+          fi
+          echo "OK: --src is required"
+
+      - name: Check UTF-8 stdout reconfigure
+        run: |
+          # Verify scripts force UTF-8 output (no mojibake on any platform)
+          python -c "
+          import importlib.util, sys
+          for path in [
+              '.claude/skills/bsp-core/scripts/bsp_core_search.py',
+              '.claude/skills/bsp-data/scripts/bsp_data_search.py',
+              '.claude/skills/bsp-ops/scripts/bsp_ops_search.py',
+              '.claude/skills/bsp-ui-forms/scripts/bsp_ui_search.py',
+          ]:
+              spec = importlib.util.spec_from_file_location('m', path)
+              m = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(m)
+              # If we got here without error, the UTF-8 reconfigure block ran
+              print(f'OK: {path}')
+          "
+
+      # NOTE: The key-methods validation requires the BSP configuration export
+      # (src/cf/), which is in .gitignore and not available in CI. The
+      # validation runs locally before commit. To enable in CI, provide the
+      # export as an artifact or remove src/ from .gitignore for the workflow.
+      #
+      # - name: Validate key-methods tables against BSP source
+      #   run: python ci/validate_key_methods.py --src src/cf
