@@ -72,6 +72,17 @@ def _load_all_parsers(skills_dir):
     return parsers
 
 
+# Skill directories that do NOT document BSP common-module exports and
+# must be skipped by the validator. Only the four bsp-* clusters contain
+# `Module.Method` tables that reference BSP source code; other skills
+# (agents-best-practices, opencode-runner, prompt-crafting-guide, …) use the
+# same `Word.Word` syntax for documentation cross-references (file names,
+# section titles) and would produce false positives.
+BSP_CLUSTER_DIRS = frozenset({
+    "bsp-core", "bsp-data", "bsp-ops", "bsp-ui-forms",
+})
+
+
 # ---------------------------------------------------------------------------
 # Markdown table parser: extract Module.Method + stability from key-methods.md
 # ---------------------------------------------------------------------------
@@ -81,6 +92,69 @@ def _load_all_parsers(skills_dir):
 RE_METHOD_CELL = re.compile(
     r"`(?P<module>[A-Za-zА-Яа-яЁё0-9_]+)\.(?P<method>[A-Za-zА-Яа-яЁё0-9_]+)`"
 )
+
+# 1C metadata object type prefixes that should NOT be treated as
+# Module.Method calls. These appear in skills as references to metadata
+# objects (registers, constants, scheduled jobs, catalog refs, common forms)
+# and use the same `Type.Name` syntax, but are not common-module exports.
+METADATA_TYPE_PREFIXES = frozenset({
+    # English forms (configuration export / English metadata API)
+    "InformationRegister", "Constant", "ScheduledJob", "Catalog",
+    "CatalogRef", "Document", "DocumentRef", "ChartOfCharacteristicTypes",
+    "ChartOfCharacteristicTypesRef", "InformationRegisterRecord",
+    "CatalogObject", "DocumentObject", "Enum", "EnumRef",
+    "CatalogManager", "DocumentManager", "InformationRegisterManager",
+    "ConstantManager", "ConstantValueManager", "Task", "TaskRef",
+    "Sequence", "SequenceRecord", "ExchangePlan", "ExchangePlanRef",
+    "CalculationRegister", "CalculationRegisterRecord",
+    "AccumulationRegister", "AccumulationRegisterRecord",
+    "AccountingRegister", "AccountingRegisterRecord",
+    "ChartOfCalculationTypes", "ChartOfCalculationTypesRef",
+    "BusinessProcess", "BusinessProcessRef", "BusinessProcessObject",
+    "BusinessProcessRoute", "BusinessProcessRoutePoint",
+    "CatalogSelection", "DocumentSelection", "InformationRegisterSelection",
+    "CommonForm", "CommonTemplate", "CommonModule", "CommonPicture",
+    "CommonAttribute", "FilterTemplate", "DataProcessor", "Report",
+    "SettingsStorage", "Cube", "CubeDimensionTable", "Table",
+    "Characteristic", "ExternalDataProcessor", "ExternalReport",
+    "HTTPService", "WebService", "Bot",
+    # Russian forms (platform 1C:Предприятие Russian metadata API)
+    "РегистрСведений", "РегистрНакопления", "РегистрБухгалтерии",
+    "РегистрРасчета", "Константа", "РегламентноеЗадание",
+    "Справочник", "СправочникСсылка", "СправочникОбъект",
+    "СправочникМенеджер", "СправочникНаборЗаписей", "СправочникВыборка",
+    "Документ", "ДокументСсылка", "ДокументОбъект", "ДокументМенеджер",
+    "ДокументВыборка", "ДокументНаборЗаписей",
+    "ПланВидовХарактеристик", "ПланВидовХарактеристикСсылка",
+    "ПланВидовРасчета", "ПланВидовРасчетаСсылка",
+    "ПланСчетов", "ПланСчетовСсылка",
+    "ПланОбмена", "ПланОбменаСсылка",
+    "Перечисление", "ПеречислениеСсылка",
+    "Последовательность", "ПоследовательностьНаборЗаписей",
+    "Перерасчет", "БизнесПроцесс", "БизнесПроцессСсылка",
+    "БизнесПроцессОбъект", "Задача", "ЗадачаСсылка", "ЗадачаОбъект",
+    "ОбщаяФорма", "ОбщийМакет", "ОбщийМодуль", "ОбщаяКартинка",
+    "ОбщийРеквизит", "ОбработкаВыбор", "Отчет", "Обработка",
+    "ХранилищеНастроек", "Куб", "ТаблицаИзмерений", "Таблица",
+    "Характеристика", "ВнешняяОбработка", "ВнешнийОтчет",
+    "HTTPСервис", "WebСервис", "Бот",
+    "ФункциональнаяОпция", "ПараметрСеанса", "КритерийОтбора",
+    "ПодпискаНаСобытие", "РегламентноеЗаданиеМенеджер",
+    "РегистрСведенийМенеджер", "РегистрСведенийВыборка",
+    "РегистрСведенийНаборЗаписей", "РегистрСведенийЗапись",
+    "РегистрНакопленияМенеджер", "РегистрНакопленияВыборка",
+    "РегистрНакопленияНаборЗаписей", "РегистрНакопленияЗапись",
+    "СправочникСсылка.", "ДокументСсылка.",
+    "ОпределяемыйТип", "ПолноеИмя", "Метаданные",
+})
+
+
+def is_metadata_reference(module_name):
+    """Return True if `module_name` is a 1C metadata object type, not a
+    common module. Such `Type.Name` cells describe metadata objects
+    (registers, constants, scheduled jobs, catalog refs, common forms, …)
+    and must not be validated as Module.Method exports."""
+    return module_name in METADATA_TYPE_PREFIXES
 
 # Stability markers found anywhere in a row.
 STABLE_MARKERS = {"стабильный", "стабильная", "✅ стабильный", "✅ стабильная"}
@@ -116,13 +190,39 @@ def parse_key_methods_table(md_path):
             continue
         module = m.group("module")
         method = m.group("method")
-        # Determine declared stability from the whole row
-        lower_row = row_text.lower()
+        # Skip 1C metadata object references (InformationRegister.X,
+        # Constant.X, СправочникСсылка.X, ОбщаяФорма.X, …) — they are not
+        # common-module exports and cannot be validated against source.
+        if is_metadata_reference(module):
+            continue
+        # Determine declared stability. The "Стабильность" column is not
+        # fixed-position across skill files: in some tables it is the last
+        # column, in others it precedes "Назначение"/"Пример". We scan every
+        # cell for a stability marker, but only accept a cell as the
+        # "stability" cell when its content is dominated by the marker (i.e.
+        # the marker is most of what the cell says) — this prevents a long
+        # "Назначение" cell that incidentally mentions "стабильная обёртка"
+        # from being mistaken for the stability verdict.
+        # Priority: if any short cell (< 40 chars) carries an unstable
+        # marker, verdict = unstable. Else if any short cell carries a
+        # stable marker, verdict = stable. Else fall back to whole-row scan.
         is_stable_decl = None
-        if any(marker.lower() in lower_row for marker in STABLE_MARKERS):
-            is_stable_decl = True
-        elif any(marker.lower() in lower_row for marker in UNSTABLE_MARKERS):
-            is_stable_decl = False
+        for c in cells:
+            cl = c.lower()
+            if len(c) < 40 and any(m.lower() in cl for m in UNSTABLE_MARKERS):
+                is_stable_decl = False
+                break
+            if len(c) < 40 and any(m.lower() in cl for m in STABLE_MARKERS):
+                is_stable_decl = True
+                # don't break — a later short cell may carry an unstable
+                # marker that overrides this.
+        if is_stable_decl is None:
+            # No dedicated short stability cell: fall back to whole-row scan.
+            lower_row = row_text.lower()
+            if any(marker.lower() in lower_row for marker in STABLE_MARKERS):
+                is_stable_decl = True
+            elif any(marker.lower() in lower_row for marker in UNSTABLE_MARKERS):
+                is_stable_decl = False
         yield (module, method, is_stable_decl, row_text)
 
 
@@ -270,9 +370,13 @@ def main():
         sys.exit(2)
 
     # Find all *.md files in references/ that contain method tables.
-    # This includes *-key-methods.md AND the main leaf skill files
-    # (e.g. bsp-print-reports.md) which may declare stability markers.
-    md_files = sorted(skills_dir.glob("*/references/*.md"))
+    # Only the four bsp-* cluster skills document BSP common-module exports;
+    # other skill directories use the same `Word.Word` syntax for
+    # documentation cross-references and would produce false positives.
+    md_files = sorted(
+        f for f in skills_dir.glob("*/references/*.md")
+        if f.parent.parent.name in BSP_CLUSTER_DIRS
+    )
     # Exclude files that clearly have no method tables (short ones, key-methods
     # already covered). We keep all and let the table parser skip non-tables.
     key_methods_files = [f for f in md_files if "-key-methods" in f.name]
