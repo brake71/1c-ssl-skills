@@ -25,60 +25,60 @@
   `~/.config/opencode/skills/`
 - любой другой harness, читающий `SKILL.md`
 
-Начинать с `bsp-fundamentals` — он объясняет терминологию, суффиксы
-модулей и границы API. Остальные скилы самодостаточны и подключаются
-по задаче.
+Архитектура — **4 кластерных umbrella-скила** с decision-tree роутингом.
+`SKILL.md` кластера содержит дерево решений и направляет к нужному
+leaf-скилу из `references/`. Начинать с загрузки кластерного скила, он
+сам определит нужный leaf.
 
 ## Быстрый старт
 
-Клонировать и подключить нужные скилы к проекту:
+### Вариант 1 — клон репозитория
 
 ```bash
 git clone https://github.com/brake71/1c-ssl-skills.git
-cp -r bsp-docs/.claude/skills/bsp-fundamentals .claude/skills/
-cp -r bsp-docs/.claude/skills/bsp-base-common  .claude/skills/
+# BSP-скилы лежат в .claude/skills/bsp-*/ внутри клона.
+# Подключить к своему проекту — скопировать нужные кластеры:
+cp -r 1c-ssl-skills/.claude/skills/bsp-core      .claude/skills/
+cp -r 1c-ssl-skills/.claude/skills/bsp-data      .claude/skills/
+cp -r 1c-ssl-skills/.claude/skills/bsp-ui-forms  .claude/skills/
+cp -r 1c-ssl-skills/.claude/skills/bsp-ops       .claude/skills/
 ```
 
-Взять все скилы разом:
+Взять все BSP-скилы разом (4 кластера):
 
 ```bash
-cp -r bsp-docs/.claude/skills/* .claude/skills/
+cp -r 1c-ssl-skills/.claude/skills/bsp-* .claude/skills/
 ```
 
-Проверка: задать агенту вопрос по любой подсистеме из таблицы ниже — в
-ответе должны появиться реальные имена модулей и методов БСП 3.1.11, а
-не выдуманные.
+### Вариант 2 — из релиза
+
+На странице [Releases](https://github.com/brake71/1c-ssl-skills/releases)
+доступен архив `bsp-skills-vX.Y.zip` только с каталогом `.claude/skills/`. Скачать, распаковать
+и скопировать в свой проект:
+
+```bash
+unzip bsp-skills-v0.2.zip -d bsp-skills
+cp -r bsp-skills/.claude/skills/bsp-* .claude/skills/
+```
+
+### Проверка
+
+Задать агенту вопрос по любой подсистеме из таблицы ниже — в ответе
+должны появиться реальные имена модулей и методов БСП 3.1.11, а не
+выдуманные.
 
 ## Скилы
 
-Статус `ready` означает, что `SKILL.md` опубликован в репозитории.
-Слои: L0 — навигация; L1 — ключевые подсистемы (P0); L2 — расширенные
-(P1); L3 — нишевые (P2), подключаются по запросу.
+BSP-скилы — 4 кластерных umbrella + leaf-скилы в `references/` каждого
+кластера. Кластерный `SKILL.md` содержит decision-tree роутинг к leaf-ам.
 
-| Слой | Скил | Назначение | Статус |
-|------|------|------------|--------|
-| L0 | bsp-fundamentals | Навигация по БСП: иерархия подсистем, суффиксы модулей, границы API | ready |
-| L1 | bsp-base-common | Общие утилиты: строки, XML/JSON, безопасное хранилище, файлы | ready |
-| L1 | bsp-commands-external | Подключаемые команды, регистрация внешних отчётов и обработок | ready |
-| L1 | bsp-data-exchange | Обмен данными: планы обмена, регистрация изменений, XDTO | ready |
-| L1 | bsp-longs-and-jobs | Длительные операции и регламентные задания | ready |
-| L1 | bsp-print-reports | Печатные формы, варианты отчётов, выгрузка в файлы | ready |
-| L1 | bsp-users-access | Текущий пользователь, роли, RLS-проверки | ready |
-| L2 | bsp-bp-tasks | Бизнес-процессы и задачи: выполнение, перенаправление, контроль | ready |
-| L2 | bsp-comms | Email, SMS, шаблоны сообщений, обсуждения | ready |
-| L2 | bsp-contact-info | Контактная информация, адреса, ФИАС/КЛАДР, ОКТМО | ready |
-| L2 | bsp-esign-mcd | Электронная подпись, машиночитаемые доверенности (МЧД) | ready |
-| L2 | bsp-files-and-versions | Прикрепление файлов, версионирование объектов | ready |
-| L2 | bsp-forms-validation | Дополнительные реквизиты, запрет редактирования | ready |
-| L2 | bsp-perf-monitoring | Замеры производительности, экспорт в центр мониторинга | ready |
-| L3 | bsp-backup | Резервное копирование информационной базы | ready |
-| L3 | bsp-classifiers | Производственный календарь, графики работы | ready |
-| L3 | bsp-currencies-banks | Валюты, банки, организации, курсы | ready |
-| L3 | bsp-multilang | Мультиязычные реквизиты объектов | ready |
-| L3 | bsp-prefixes | Префиксация объектов для РИБ и обменов | ready |
-| L3 | bsp-protection-pd | Защита персональных данных (152-ФЗ) | ready |
-| L3 | bsp-report-dedup | Поиск и удаление дублей, групповое изменение объектов | ready |
-| L3 | bsp-update | Обработчики обновления информационной базы | ready |
+
+| Кластер (umbrella) | Назначение                                                                                                                                                                              | Leaf-скилы                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `bsp-core`                | Навигация, утилиты, фоновые задания, префиксы, обновление                                                                                         | `bsp-fundamentals`, `bsp-base-common`, `bsp-longs-and-jobs`, `bsp-prefixes`, `bsp-update`                                           |
+| `bsp-data`                | Обмен данными, ЭП/МЧД, контактная информация, классификаторы, валюты/банки, внешние компоненты                     | `bsp-data-exchange`, `bsp-esign-mcd`, `bsp-contact-info`, `bsp-classifiers`, `bsp-currencies-banks`, `bsp-external-components`      |
+| `bsp-ui-forms`            | Подключаемые команды, печать, свойства форм, мультиязычность, файлы/версии, дубли                                             | `bsp-commands-external`, `bsp-print-reports`, `bsp-forms-validation`, `bsp-multilang`, `bsp-files-and-versions`, `bsp-report-dedup` |
+| `bsp-ops`                 | Пользователи/доступ, почта/SMS, бизнес-процессы, администрирование, резервное копирование, мониторинг, ПДн | `bsp-users-access`, `bsp-comms`, `bsp-bp-tasks`, `bsp-admin-tools`, `bsp-backup`, `bsp-perf-monitoring`, `bsp-protection-pd`        |
 
 ## Лицензия
 
