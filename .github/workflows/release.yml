@@ -14,14 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Pack BSP skills
+      - name: Pack BSP skill
         run: |
           ARCHIVE_NAME="bsp-skills-${{ github.ref_name }}.zip"
           zip -r "$ARCHIVE_NAME" \
-            .claude/skills/bsp-core \
-            .claude/skills/bsp-data \
-            .claude/skills/bsp-ops \
-            .claude/skills/bsp-ui-forms
+            .claude/skills/bsp
           echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_ENV"
 
       - name: Create GitHub Release

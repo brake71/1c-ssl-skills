@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""CI validator: check key-methods tables against actual BSP source code.
+"""CI validator: check `Module.Method` mentions against actual BSP source code.
 
-For every method declared in `*-key-methods.md` tables, the validator:
-  1. Parses the markdown table to extract `Module.Method` + declared stability.
-  2. Runs the same parser used by the skill search scripts on the real
-     `.bsl` file from the configuration export (`--src`).
+For every `Module.Method` mention found in the BSP skill's reference files
+(`.claude/skills/bsp/references/*.md`), the validator:
+  1. Extracts the `Module.Method` token from backticked code spans, plus any
+     declared stability (markers "стабильный"/"служебный" in the row), if present.
+  2. Parses the real `.bsl` module from the configuration export (`--src`)
+     with the BSP skill's own parser (bsp_api.parse_export_methods).
   3. Reports mismatches:
-     - method not found in the module (typos, hallucinated names)
-     - method exists but declared "стабильный" while actually in
-       `СлужебныйПрограммныйИнтерфейс` / `СлужебныеПроцедурыИФункции`
-     - method exists but declared "служебный" while actually in
-       `ПрограммныйИнтерфейс` (over-conservative, less severe)
+     - module not found in the export (typos, hallucinated module names)
+     - method not exported from the module (typos, hallucinated method names)
+     - method declared "стабильный" while actually in a non-stable region
+       (`СлужебныйПрограммныйИнтерфейс` / `СлужебныеПроцедурыИФункции`, etc.)
+     - method declared "служебный" while actually in `ПрограммныйИнтерфейс`
+       (over-conservative, less severe)
 
-Exit code 0 = all checks pass; 1 = mismatches found.
+Note: the new unified `bsp/` skill carries full inline signatures in workflow
+scenarios rather than a dedicated "Стабильность" table column, so most mentions
+have no declared stability — the validator then only confirms existence of the
+module/method (the main guard against hallucinated names).
+
+Exit code 0 = all checks pass; 1 = mismatches found; 2 = bad --src / --skills-dir.
 
 Usage:
     python ci/validate_key_methods.py --src <path/to/cf>
@@ -37,50 +45,36 @@ for _stream in (sys.stdout, sys.stderr):
 
 
 # ---------------------------------------------------------------------------
-# Parser import: load parse_export_methods from the 4 skill scripts.
-# We import all 4 because a key-methods table may reference modules from any
-# cluster (e.g. bsp-admin-tools-key-methods references СоединенияИБ which is
-# in the ops cluster, but the table file is in bsp-ops anyway).
+# Parser import: load parse_export_methods from the single BSP skill script.
+# The unified `bsp/` skill ships one search script (bsp_api.py); it exports
+# parse_export_methods(bsl_path) -> [(name, region, sig_text, doc_lines), …]
+# with region = the real #Область name (ПрограммныйИнтерфейс is stable).
 # ---------------------------------------------------------------------------
 
-def _load_parser(script_path):
-    """Load a skill search script as a module and return parse_export_methods."""
-    spec = importlib.util.spec_from_file_location(
-        Path(script_path).stem, script_path)
+def _load_parser(skills_dir):
+    """Load the BSP skill search script and return (parse_fn, module)."""
+    script_path = skills_dir / "bsp" / "scripts" / "bsp_api.py"
+    if not script_path.is_file():
+        raise RuntimeError(f"BSP skill script not found: {script_path}")
+    spec = importlib.util.spec_from_file_location(script_path.stem, script_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Cannot load module spec from {script_path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.parse_export_methods, mod.MODULE_PREFIXES
+    return mod.parse_export_methods, mod
 
 
-def _load_all_parsers(skills_dir):
-    """Return list of (parse_fn, prefixes) for all 4 cluster scripts."""
-    scripts = [
-        skills_dir / "bsp-core" / "scripts" / "bsp_core_search.py",
-        skills_dir / "bsp-data" / "scripts" / "bsp_data_search.py",
-        skills_dir / "bsp-ops" / "scripts" / "bsp_ops_search.py",
-        skills_dir / "bsp-ui-forms" / "scripts" / "bsp_ui_search.py",
-    ]
-    parsers = []
-    for s in scripts:
-        if not s.is_file():
-            print(f"WARN: skill script not found: {s}", file=sys.stderr)
-            continue
-        parse_fn, prefixes = _load_parser(s)
-        parsers.append((parse_fn, prefixes, s.parent.parent.name))
-    return parsers
-
-
-# Skill directories that do NOT document BSP common-module exports and
-# must be skipped by the validator. Only the four bsp-* clusters contain
-# `Module.Method` tables that reference BSP source code; other skills
-# (agents-best-practices, opencode-runner, prompt-crafting-guide, …) use the
-# same `Word.Word` syntax for documentation cross-references (file names,
-# section titles) and would produce false positives.
+# The single BSP skill documents common-module exports in its references/.
+# Other skill directories (agents-best-practices, opencode-runner,
+# prompt-crafting-guide, …) use the same `Word.Word` syntax for documentation
+# cross-references (file names, section titles) and would produce false
+# positives — hence the allow-list.
 BSP_CLUSTER_DIRS = frozenset({
-    "bsp-core", "bsp-data", "bsp-ops", "bsp-ui-forms",
+    "bsp",
 })
+
+# Region names that mark a stable export (from bsp_api.STABLE_REGION).
+STABLE_REGION_NAME = "ПрограммныйИнтерфейс"
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +150,14 @@ def is_metadata_reference(module_name):
     and must not be validated as Module.Method exports."""
     return module_name in METADATA_TYPE_PREFIXES
 
+# File-name extensions that, as the "method" part of a `Word.Word` token,
+# mark a reference to a sibling file (e.g. `prefixes.md`, `base-common.md`)
+# rather than a common-module export. These must not be validated.
+FILE_EXTENSIONS = frozenset({
+    "md", "bsl", "xml", "json", "py", "txt", "html", "htm", "yml", "yaml",
+    "jpeg", "jpg", "png", "gif", "svg", "csv", "tsv", "log",
+})
+
 # Stability markers found anywhere in a row.
 STABLE_MARKERS = {"стабильный", "стабильная", "✅ стабильный", "✅ стабильная"}
 UNSTABLE_MARKERS = {"служебный", "⚠️ служебный", "служебная", "⚠️ служебная"}
@@ -195,6 +197,10 @@ def parse_key_methods_table(md_path):
         # common-module exports and cannot be validated against source.
         if is_metadata_reference(module):
             continue
+        # Skip sibling-file references (`prefixes.md`, `base-common.md`, …):
+        # the "method" part is a file extension, not a method name.
+        if method.lower() in FILE_EXTENSIONS:
+            continue
         # Determine declared stability. The "Стабильность" column is not
         # fixed-position across skill files: in some tables it is the last
         # column, in others it precedes "Назначение"/"Пример". We scan every
@@ -230,67 +236,44 @@ def parse_key_methods_table(md_path):
 # Validation logic
 # ---------------------------------------------------------------------------
 
-def find_module_in_src(src, module_name, parsers):
-    """Return (bsl_path, parse_fn) for module_name, or (None, None).
-
-    Tries each cluster parser's prefix list to decide which parser owns
-    the module, then lists common modules via that parser's list_common_modules.
-    """
-    for parse_fn, prefixes, cluster_name in parsers:
-        if any(module_name.startswith(p) for p in prefixes):
-            # This cluster owns the module; find it in src
-            cm_dir = Path(src) / "CommonModules"
-            if not cm_dir.is_dir():
-                continue
-            for entry in sorted(cm_dir.iterdir()):
-                if entry.is_dir() and entry.name == module_name:
-                    bsl = entry / "Ext" / "Module.bsl"
-                    return (bsl, parse_fn, cluster_name)
-            # Prefix matched but module dir not found
-            return (None, parse_fn, cluster_name)
-    # No prefix matched — module may exist but no parser covers it
+def find_module_in_src(src, module_name):
+    """Return bsl_path for module_name, or None if not in the export."""
     cm_dir = Path(src) / "CommonModules"
-    if cm_dir.is_dir():
-        for entry in sorted(cm_dir.iterdir()):
-            if entry.is_dir() and entry.name == module_name:
-                bsl = entry / "Ext" / "Module.bsl"
-                return (bsl, None, "(no parser covers this module prefix)")
-    return (None, None, None)
+    if not cm_dir.is_dir():
+        return None
+    for entry in sorted(cm_dir.iterdir()):
+        if entry.is_dir() and entry.name == module_name:
+            bsl = entry / "Ext" / "Module.bsl"
+            return bsl if bsl.is_file() else None
+    return None
 
 
-def validate(md_path, src, parsers):
-    """Validate one key-methods file. Return list of issue dicts."""
+def validate(md_path, src, parse_fn):
+    """Validate one reference file's `Module.Method` mentions against src.
+
+    parse_fn: bsp_api.parse_export_methods — returns
+    [(method_name, region, sig_text, doc_lines), …]. A method is stable iff
+    its region == ПрограммныйИнтерфейс.
+    """
     issues = []
     for module, method, declared_stable, raw_row in parse_key_methods_table(md_path):
-        bsl_path, parse_fn, cluster_name = find_module_in_src(src, module, parsers)
+        bsl_path = find_module_in_src(src, module)
         if bsl_path is None:
             issues.append({
                 "file": str(md_path),
                 "module": module,
                 "method": method,
                 "severity": "ERROR",
-                "message": f"module '{module}' not found in src (cluster: {cluster_name})",
+                "message": f"module '{module}' not found in src",
                 "row": raw_row,
             })
             continue
-        if parse_fn is None:
-            # Module exists but no parser covers its prefix — can't verify
-            # stability region. Report as INFO (not a failure).
-            issues.append({
-                "file": str(md_path),
-                "module": module,
-                "method": method,
-                "severity": "INFO",
-                "message": f"module '{module}' exists but no cluster parser covers it; stability not verified",
-                "row": raw_row,
-            })
-            continue
-        # Parse the real module and find the method (include unstable)
-        methods = parse_fn(bsl_path, only_stable=False)
+        # Parse the real module (all regions, exports only).
+        methods = parse_fn(bsl_path)
         found = None
-        for m_name, is_stable_actual, region in methods:
+        for m_name, region, _sig, _doc in methods:
             if m_name == method:
-                found = (is_stable_actual, region)
+                found = (region,)
                 break
         if found is None:
             issues.append({
@@ -302,13 +285,16 @@ def validate(md_path, src, parsers):
                 "row": raw_row,
             })
             continue
-        is_stable_actual, region = found
+        (region,) = found
+        is_stable_actual = (region == STABLE_REGION_NAME)
         if declared_stable is None:
-            # Table didn't declare stability — skip region check
+            # Reference didn't declare stability — skip region check (we still
+            # confirmed the method exists, which is the main guard against
+            # hallucinated method/module names).
             continue
         if declared_stable and not is_stable_actual:
-            severity = "ERROR" if region in (None, "unstable") else "WARN"
-            region_label = region or "СлужебныеПроцедурыИФункции"
+            severity = "ERROR" if region is None else "WARN"
+            region_label = region or "(вне отслеживаемых областей)"
             issues.append({
                 "file": str(md_path),
                 "module": module,
@@ -364,36 +350,29 @@ def main():
         print(f"Error: --skills-dir not found: {skills_dir}", file=sys.stderr)
         sys.exit(2)
 
-    parsers = _load_all_parsers(skills_dir)
-    if not parsers:
-        print("Error: no skill search scripts found.", file=sys.stderr)
-        sys.exit(2)
+    parse_fn, _bsp_mod = _load_parser(skills_dir)
 
-    # Find all *.md files in references/ that contain method tables.
-    # Only the four bsp-* cluster skills document BSP common-module exports;
-    # other skill directories use the same `Word.Word` syntax for
-    # documentation cross-references and would produce false positives.
+    # Find all *.md files in references/ that contain `Module.Method` mentions.
+    # Only the BSP skill documents common-module exports; other skill
+    # directories use the same `Word.Word` syntax for documentation
+    # cross-references and would produce false positives.
     md_files = sorted(
         f for f in skills_dir.glob("*/references/*.md")
         if f.parent.parent.name in BSP_CLUSTER_DIRS
     )
-    # Exclude files that clearly have no method tables (short ones, key-methods
-    # already covered). We keep all and let the table parser skip non-tables.
-    key_methods_files = [f for f in md_files if "-key-methods" in f.name]
-    leaf_files = [f for f in md_files if "-key-methods" not in f.name]
 
-    print(f"Validating {len(key_methods_files)} key-methods file(s) "
-          f"+ {len(leaf_files)} leaf reference file(s) against {src}...")
+    print(f"Validating {len(md_files)} reference file(s) from {skills_dir}/bsp "
+          f"against {src}...")
     all_issues = []
     total_methods = 0
-    for kmf in key_methods_files + leaf_files:
-        # Count methods
+    for kmf in md_files:
+        # Count `Module.Method` mentions found in this file.
         methods_in_file = list(parse_key_methods_table(kmf))
         if not methods_in_file:
             continue
         total_methods += len(methods_in_file)
         print(f"\n=== {kmf} ({len(methods_in_file)} methods) ===")
-        issues = validate(kmf, src, parsers)
+        issues = validate(kmf, src, parse_fn)
         all_issues.extend(issues)
         if not issues:
             print("  OK")
