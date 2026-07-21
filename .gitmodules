@@ -1,0 +1,3 @@
+[submodule ".claude/skills/agents-best-practices"]
+	path = .claude/skills/agents-best-practices
+	url = https://github.com/DenisSergeevitch/agents-best-practices.git

@@ -5,11 +5,15 @@ on:
     paths:
       - '.claude/skills/**'
       - 'ci/**'
+      - 'tests/**'
+      - '.gitmodules'
       - '.github/workflows/validate-skills.yml'
   pull_request:
     paths:
       - '.claude/skills/**'
       - 'ci/**'
+      - 'tests/**'
+      - '.gitmodules'
       - '.github/workflows/validate-skills.yml'
 
 jobs:
@@ -17,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate submodule mappings
+        run: git submodule status
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -27,6 +34,12 @@ jobs:
         run: |
           python -m py_compile .claude/skills/bsp/scripts/bsp_api.py
           python -m py_compile ci/validate_key_methods.py
+
+      - name: Run parser and validator tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Enforce API claim coverage
+        run: python ci/validate_key_methods.py --coverage-only
 
       - name: Validate skill scripts run (--src required)
         run: |
@@ -53,10 +66,10 @@ jobs:
           print(f'OK: {path}')
           "
 
-      # NOTE: The key-methods validation requires the BSP configuration export
-      # (src/cf/), which is in .gitignore and not available in CI. The
-      # validation runs locally before commit. To enable in CI, provide the
-      # export as an artifact or remove src/ from .gitignore for the workflow.
+      # NOTE: Semantic validation requires the BSP configuration export
+      # (src/cf/), which is in .gitignore and not available in CI. Extraction
+      # coverage and parser semantics are checked above with synthetic BSL
+      # fixtures; the full validation runs locally before commit.
       #
-      # - name: Validate key-methods tables against BSP source
+      # - name: Validate API claims against BSP source
       #   run: python ci/validate_key_methods.py --src src/cf

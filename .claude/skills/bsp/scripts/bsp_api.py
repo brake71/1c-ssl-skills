@@ -140,7 +140,10 @@ def parse_export_methods(bsl_path):
         j = i
         is_export = "Экспорт" in stripped
         if not is_export:
-            for j2 in range(i + 1, min(i + 30, n)):
+            # Scan until the declaration ends instead of imposing an arbitrary
+            # line limit: generated BSL can place long parameter lists on more
+            # than 30 lines.
+            for j2 in range(i + 1, n):
                 s2 = lines[j2].strip()
                 if s2 == end_keyword or s2.startswith(end_keyword):
                     j = j2

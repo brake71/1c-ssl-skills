@@ -1,406 +1,478 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""CI validator: check `Module.Method` mentions against actual BSP source code.
+"""Validate BSP API claims embedded in the unified ``bsp`` skill.
 
-For every `Module.Method` mention found in the BSP skill's reference files
-(`.claude/skills/bsp/references/*.md`), the validator:
-  1. Extracts the `Module.Method` token from backticked code spans, plus any
-     declared stability (markers "стабильный"/"служебный" in the row), if present.
-  2. Parses the real `.bsl` module from the configuration export (`--src`)
-     with the BSP skill's own parser (bsp_api.parse_export_methods).
-  3. Reports mismatches:
-     - module not found in the export (typos, hallucinated module names)
-     - method not exported from the module (typos, hallucinated method names)
-     - method declared "стабильный" while actually in a non-stable region
-       (`СлужебныйПрограммныйИнтерфейс` / `СлужебныеПроцедурыИФункции`, etc.)
-     - method declared "служебный" while actually in `ПрограммныйИнтерфейс`
-       (over-conservative, less severe)
+The reference files express checkable API claims as inline code spans:
 
-Note: the new unified `bsp/` skill carries full inline signatures in workflow
-scenarios rather than a dedicated "Стабильность" table column, so most mentions
-have no declared stability — the validator then only confirms existence of the
-module/method (the main guard against hallucinated names).
+    `Модуль.Метод(Параметры) Экспорт`
 
-Exit code 0 = all checks pass; 1 = mismatches found; 2 = bad --src / --skills-dir.
+The validator extracts those claims from every reference file, enforces a
+non-zero coverage floor, and (when ``--src`` is supplied) compares each claim
+with the exported methods in a BSP configuration dump.
 
-Usage:
-    python ci/validate_key_methods.py --src <path/to/cf>
-    python ci/validate_key_methods.py --src src/cf --skills-dir .claude/skills
+Explicit nearby wording such as "не существует" or "не экспортируется" turns
+a claim into a negative assertion: validation succeeds only while the method
+is not a public export. This keeps anti-hallucination examples testable too.
+
+Exit codes: 0 = pass; 1 = validation/coverage failure; 2 = bad arguments/paths.
 """
+
+from __future__ import annotations
 
 import argparse
 import importlib.util
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Iterable
 
-# Force UTF-8 output (Windows console defaults to cp1251)
+
 for _stream in (sys.stdout, sys.stderr):
-    _reconf = getattr(_stream, "reconfigure", None)
-    if _reconf is not None:
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure is not None:
         try:
-            _reconf(encoding="utf-8")
+            _reconfigure(encoding="utf-8")
         except (TypeError, ValueError):
             pass
 
 
-# ---------------------------------------------------------------------------
-# Parser import: load parse_export_methods from the single BSP skill script.
-# The unified `bsp/` skill ships one search script (bsp_api.py); it exports
-# parse_export_methods(bsl_path) -> [(name, region, sig_text, doc_lines), …]
-# with region = the real #Область name (ПрограммныйИнтерфейс is stable).
-# ---------------------------------------------------------------------------
+DEFAULT_MIN_CLAIMS = 600
+DEFAULT_MIN_FILES = 23
+DEFAULT_MIN_COVERAGE = 95.0
 
-def _load_parser(skills_dir):
-    """Load the BSP skill search script and return (parse_fn, module)."""
-    script_path = skills_dir / "bsp" / "scripts" / "bsp_api.py"
-    if not script_path.is_file():
-        raise RuntimeError(f"BSP skill script not found: {script_path}")
-    spec = importlib.util.spec_from_file_location(script_path.stem, script_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Cannot load module spec from {script_path}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.parse_export_methods, mod
-
-
-# The single BSP skill documents common-module exports in its references/.
-# Other skill directories (agents-best-practices, opencode-runner,
-# prompt-crafting-guide, …) use the same `Word.Word` syntax for documentation
-# cross-references (file names, section titles) and would produce false
-# positives — hence the allow-list.
-BSP_CLUSTER_DIRS = frozenset({
-    "bsp",
-})
-
-# Region names that mark a stable export (from bsp_api.STABLE_REGION).
 STABLE_REGION_NAME = "ПрограммныйИнтерфейс"
-
-
-# ---------------------------------------------------------------------------
-# Markdown table parser: extract Module.Method + stability from key-methods.md
-# ---------------------------------------------------------------------------
-
-# A table cell like `ОбщегоНазначения.СообщитьПользователю` or
-# `УправлениеПечатью.СформироватьПечатныеФормы` (in backticks).
-RE_METHOD_CELL = re.compile(
-    r"`(?P<module>[A-Za-zА-Яа-яЁё0-9_]+)\.(?P<method>[A-Za-zА-Яа-яЁё0-9_]+)`"
+TRACKED_REGIONS = (
+    STABLE_REGION_NAME,
+    "СлужебныйПрограммныйИнтерфейс",
+    "СлужебныеПроцедурыИФункции",
+    "УстаревшиеПроцедурыИФункции",
+    "ПереопределениеВызовов",
+    "ПереопределениеТекстаЗапросаНабораДанных",
 )
 
-# 1C metadata object type prefixes that should NOT be treated as
-# Module.Method calls. These appear in skills as references to metadata
-# objects (registers, constants, scheduled jobs, catalog refs, common forms)
-# and use the same `Type.Name` syntax, but are not common-module exports.
+# Match an inline call/signature and keep everything inside the same code span.
+RE_INLINE_CALL = re.compile(
+    r"`(?P<module>[A-Za-zА-Яа-яЁё0-9_]+)\."
+    r"(?P<method>[A-Za-zА-Яа-яЁё0-9_]+)\s*\((?P<tail>[^`]*)`"
+)
+
+# Metadata namespaces and ordinary variables can also look like Module.Method.
+# They are deliberately excluded before calculating semantic coverage.
 METADATA_TYPE_PREFIXES = frozenset({
-    # English forms (configuration export / English metadata API)
     "InformationRegister", "Constant", "ScheduledJob", "Catalog",
     "CatalogRef", "Document", "DocumentRef", "ChartOfCharacteristicTypes",
     "ChartOfCharacteristicTypesRef", "InformationRegisterRecord",
-    "CatalogObject", "DocumentObject", "Enum", "EnumRef",
-    "CatalogManager", "DocumentManager", "InformationRegisterManager",
-    "ConstantManager", "ConstantValueManager", "Task", "TaskRef",
-    "Sequence", "SequenceRecord", "ExchangePlan", "ExchangePlanRef",
-    "CalculationRegister", "CalculationRegisterRecord",
-    "AccumulationRegister", "AccumulationRegisterRecord",
-    "AccountingRegister", "AccountingRegisterRecord",
-    "ChartOfCalculationTypes", "ChartOfCalculationTypesRef",
-    "BusinessProcess", "BusinessProcessRef", "BusinessProcessObject",
-    "BusinessProcessRoute", "BusinessProcessRoutePoint",
-    "CatalogSelection", "DocumentSelection", "InformationRegisterSelection",
+    "CatalogObject", "DocumentObject", "Enum", "EnumRef", "Task", "TaskRef",
+    "Sequence", "ExchangePlan", "CalculationRegister", "AccumulationRegister",
+    "AccountingRegister", "ChartOfCalculationTypes", "BusinessProcess",
     "CommonForm", "CommonTemplate", "CommonModule", "CommonPicture",
-    "CommonAttribute", "FilterTemplate", "DataProcessor", "Report",
-    "SettingsStorage", "Cube", "CubeDimensionTable", "Table",
-    "Characteristic", "ExternalDataProcessor", "ExternalReport",
-    "HTTPService", "WebService", "Bot",
-    # Russian forms (platform 1C:Предприятие Russian metadata API)
+    "CommonAttribute", "DataProcessor", "Report", "ExternalDataProcessor",
+    "ExternalReport", "HTTPService", "WebService",
     "РегистрСведений", "РегистрНакопления", "РегистрБухгалтерии",
-    "РегистрРасчета", "Константа", "РегламентноеЗадание",
-    "Справочник", "СправочникСсылка", "СправочникОбъект",
-    "СправочникМенеджер", "СправочникНаборЗаписей", "СправочникВыборка",
-    "Документ", "ДокументСсылка", "ДокументОбъект", "ДокументМенеджер",
-    "ДокументВыборка", "ДокументНаборЗаписей",
-    "ПланВидовХарактеристик", "ПланВидовХарактеристикСсылка",
-    "ПланВидовРасчета", "ПланВидовРасчетаСсылка",
-    "ПланСчетов", "ПланСчетовСсылка",
-    "ПланОбмена", "ПланОбменаСсылка",
-    "Перечисление", "ПеречислениеСсылка",
-    "Последовательность", "ПоследовательностьНаборЗаписей",
-    "Перерасчет", "БизнесПроцесс", "БизнесПроцессСсылка",
-    "БизнесПроцессОбъект", "Задача", "ЗадачаСсылка", "ЗадачаОбъект",
-    "ОбщаяФорма", "ОбщийМакет", "ОбщийМодуль", "ОбщаяКартинка",
-    "ОбщийРеквизит", "ОбработкаВыбор", "Отчет", "Обработка",
-    "ХранилищеНастроек", "Куб", "ТаблицаИзмерений", "Таблица",
-    "Характеристика", "ВнешняяОбработка", "ВнешнийОтчет",
-    "HTTPСервис", "WebСервис", "Бот",
-    "ФункциональнаяОпция", "ПараметрСеанса", "КритерийОтбора",
-    "ПодпискаНаСобытие", "РегламентноеЗаданиеМенеджер",
-    "РегистрСведенийМенеджер", "РегистрСведенийВыборка",
-    "РегистрСведенийНаборЗаписей", "РегистрСведенийЗапись",
-    "РегистрНакопленияМенеджер", "РегистрНакопленияВыборка",
-    "РегистрНакопленияНаборЗаписей", "РегистрНакопленияЗапись",
-    "СправочникСсылка.", "ДокументСсылка.",
-    "ОпределяемыйТип", "ПолноеИмя", "Метаданные",
+    "РегистрРасчета", "Константа", "РегламентноеЗадание", "Справочник",
+    "СправочникСсылка", "СправочникОбъект", "Документ", "ДокументСсылка",
+    "ДокументОбъект", "ПланВидовХарактеристик", "ПланВидовРасчета",
+    "ПланСчетов", "ПланОбмена", "Перечисление", "Последовательность",
+    "БизнесПроцесс", "БизнесПроцессСсылка", "БизнесПроцессОбъект", "Задача",
+    "ЗадачаСсылка", "ОбщаяФорма", "ОбщийМакет", "ОбщийМодуль",
+    "ОбщаяКартинка", "ОбщийРеквизит", "Отчет", "Обработка",
+    "ХранилищеНастроек", "ВнешняяОбработка", "ВнешнийОтчет", "HTTPСервис",
+    "WebСервис", "ФункциональнаяОпция", "ПараметрСеанса", "КритерийОтбора",
+    "ПодпискаНаСобытие", "ОпределяемыйТип", "Метаданные", "РегистрыСведений",
+    "Справочники", "Документы",
 })
 
-
-def is_metadata_reference(module_name):
-    """Return True if `module_name` is a 1C metadata object type, not a
-    common module. Such `Type.Name` cells describe metadata objects
-    (registers, constants, scheduled jobs, catalog refs, common forms, …)
-    and must not be validated as Module.Method exports."""
-    return module_name in METADATA_TYPE_PREFIXES
-
-# File-name extensions that, as the "method" part of a `Word.Word` token,
-# mark a reference to a sibling file (e.g. `prefixes.md`, `base-common.md`)
-# rather than a common-module export. These must not be validated.
-FILE_EXTENSIONS = frozenset({
-    "md", "bsl", "xml", "json", "py", "txt", "html", "htm", "yml", "yaml",
-    "jpeg", "jpg", "png", "gif", "svg", "csv", "tsv", "log",
+NON_COMMON_NAMESPACES = frozenset({
+    # Illustrative placeholders and local variables used in examples.
+    "Модуль", "Объект", "Файл", "Менеджер", "МенеджерОбъекта",
+    "КомандыПечати",
+    # Platform managers/global namespaces, not BSP common modules.
+    "ФоновыеЗадания", "ВнешниеОбработки",
 })
 
-# Stability markers found anywhere in a row.
-STABLE_MARKERS = {"стабильный", "стабильная", "✅ стабильный", "✅ стабильная"}
-UNSTABLE_MARKERS = {"служебный", "⚠️ служебный", "служебная", "⚠️ служебная"}
+NEGATIVE_AFTER_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"не\s+существует",
+    r"такого\s+метода[\s\S]{0,20}нет",
+    r"метод\s+отсутств",
+    r"не\s+экспортируется",
+    r"без\s+`?Экспорт`?",
+))
+NEGATIVE_BEFORE_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"несуществующ",
+    r"через\s+внутренн",
+    r"неэкспортн",
+))
 
 
-def parse_key_methods_table(md_path):
-    """Yield (module, method, declared_stable: bool|None, raw_row: str).
+@dataclass(frozen=True)
+class ApiClaim:
+    path: Path
+    line: int
+    module: str
+    method: str
+    expected_exported: bool
+    expected_region: str | None
+    raw: str
 
-    declared_stable: True = stable, False = unstable/служебный,
-    None = could not determine (skip validation).
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (str(self.path), self.module, self.method)
+
+
+@dataclass(frozen=True)
+class ClaimCollection:
+    claims: tuple[ApiClaim, ...]
+    occurrences: int
+    raw_unique: int
+    ignored_unique: int
+    files_with_claims: frozenset[Path]
+
+    @property
+    def coverage_percent(self) -> float:
+        if self.raw_unique == 0:
+            return 0.0
+        return 100.0 * len(self.claims) / self.raw_unique
+
+
+def _load_parser(skills_dir: Path):
+    script_path = skills_dir / "bsp" / "scripts" / "bsp_api.py"
+    if not script_path.is_file():
+        raise RuntimeError(f"BSP skill script not found: {script_path}")
+    spec = importlib.util.spec_from_file_location("bsp_api", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load module spec from {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.parse_export_methods
+
+
+def _after_current_sentence(text: str, match: re.Match[str], limit: int) -> str:
+    """Return nearby text about this span, not the next sentence/claim."""
+    after_end = min(len(text), match.end() + limit)
+    next_call = RE_INLINE_CALL.search(text, match.end(), after_end)
+    if next_call is not None:
+        after_end = next_call.start()
+    after = text[match.end():after_end]
+    sentence_end = re.search(r"[.!?](?:\s|\n|$)", after)
+    if sentence_end is not None:
+        after = after[:sentence_end.end()]
+    return after
+
+
+def _is_explicit_negative(text: str, match: re.Match[str]) -> bool:
+    # Text after the code span normally contains "method does not exist" /
+    # "is not exported". Stop at the sentence boundary so a following
+    # anti-example is not attached to the current valid method.
+    after = _after_current_sentence(text, match, 220)
+
+    # A few forms put "non-existent" or "internal" immediately before the span.
+    line_start = text.rfind("\n", 0, match.start()) + 1
+    before = text[max(line_start, match.start() - 90):match.start()]
+    return (
+        any(pattern.search(after) for pattern in NEGATIVE_AFTER_PATTERNS)
+        or any(pattern.search(before) for pattern in NEGATIVE_BEFORE_PATTERNS)
+    )
+
+
+def _declared_region(text: str, match: re.Match[str]) -> str | None:
+    """Read a region only when it is local to this particular code span.
+
+    A whole Markdown paragraph may describe stable, service and deprecated
+    methods together. Looking farther than the next code span would assign a
+    neighbouring method's region to the current claim.
     """
-    text = md_path.read_text(encoding="utf-8")
-    in_table = False
-    header_seen = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("|") and "---" in stripped:
-            in_table = True
-            header_seen = True
-            continue
-        if not in_table:
-            continue
-        if not stripped.startswith("|"):
-            in_table = False
-            continue
-        # It's a table row
-        cells = [c.strip() for c in stripped.strip("|").split("|")]
-        row_text = stripped
-        # Find the first Module.Method in backticks
-        m = RE_METHOD_CELL.search(row_text)
-        if not m:
-            continue
-        module = m.group("module")
-        method = m.group("method")
-        # Skip 1C metadata object references (InformationRegister.X,
-        # Constant.X, СправочникСсылка.X, ОбщаяФорма.X, …) — they are not
-        # common-module exports and cannot be validated against source.
-        if is_metadata_reference(module):
-            continue
-        # Skip sibling-file references (`prefixes.md`, `base-common.md`, …):
-        # the "method" part is a file extension, not a method name.
-        if method.lower() in FILE_EXTENSIONS:
-            continue
-        # Determine declared stability. The "Стабильность" column is not
-        # fixed-position across skill files: in some tables it is the last
-        # column, in others it precedes "Назначение"/"Пример". We scan every
-        # cell for a stability marker, but only accept a cell as the
-        # "stability" cell when its content is dominated by the marker (i.e.
-        # the marker is most of what the cell says) — this prevents a long
-        # "Назначение" cell that incidentally mentions "стабильная обёртка"
-        # from being mistaken for the stability verdict.
-        # Priority: if any short cell (< 40 chars) carries an unstable
-        # marker, verdict = unstable. Else if any short cell carries a
-        # stable marker, verdict = stable. Else fall back to whole-row scan.
-        is_stable_decl = None
-        for c in cells:
-            cl = c.lower()
-            if len(c) < 40 and any(m.lower() in cl for m in UNSTABLE_MARKERS):
-                is_stable_decl = False
-                break
-            if len(c) < 40 and any(m.lower() in cl for m in STABLE_MARKERS):
-                is_stable_decl = True
-                # don't break — a later short cell may carry an unstable
-                # marker that overrides this.
-        if is_stable_decl is None:
-            # No dedicated short stability cell: fall back to whole-row scan.
-            lower_row = row_text.lower()
-            if any(marker.lower() in lower_row for marker in STABLE_MARKERS):
-                is_stable_decl = True
-            elif any(marker.lower() in lower_row for marker in UNSTABLE_MARKERS):
-                is_stable_decl = False
-        yield (module, method, is_stable_decl, row_text)
+    line_start = text.rfind("\n", 0, match.start()) + 1
+    context = (
+        text[max(line_start, match.start() - 100):match.start()]
+        + _after_current_sentence(text, match, 260)
+    )
+    present = [region for region in TRACKED_REGIONS if region in context]
+    return present[0] if len(present) == 1 else None
 
 
-# ---------------------------------------------------------------------------
-# Validation logic
-# ---------------------------------------------------------------------------
+def collect_claims(md_paths: Iterable[Path]) -> ClaimCollection:
+    """Extract and deduplicate inline API claims from Markdown files."""
+    occurrences = 0
+    raw_keys: set[tuple[str, str, str]] = set()
+    ignored_keys: set[tuple[str, str, str]] = set()
+    extracted: list[ApiClaim] = []
 
-def find_module_in_src(src, module_name):
-    """Return bsl_path for module_name, or None if not in the export."""
-    cm_dir = Path(src) / "CommonModules"
-    if not cm_dir.is_dir():
-        return None
-    for entry in sorted(cm_dir.iterdir()):
-        if entry.is_dir() and entry.name == module_name:
-            bsl = entry / "Ext" / "Module.bsl"
-            return bsl if bsl.is_file() else None
-    return None
+    for path in sorted(md_paths):
+        text = path.read_text(encoding="utf-8")
+        for match in RE_INLINE_CALL.finditer(text):
+            occurrences += 1
+            module = match.group("module")
+            method = match.group("method")
+            key = (str(path), module, method)
+            raw_keys.add(key)
+            if module in METADATA_TYPE_PREFIXES or module in NON_COMMON_NAMESPACES:
+                ignored_keys.add(key)
+                continue
+
+            extracted.append(ApiClaim(
+                path=path,
+                line=text.count("\n", 0, match.start()) + 1,
+                module=module,
+                method=method,
+                expected_exported=not _is_explicit_negative(text, match),
+                expected_region=_declared_region(text, match),
+                raw=match.group(0),
+            ))
+
+    # If one occurrence explicitly documents a method as absent/non-exported,
+    # apply that expectation to duplicate mentions of the same method in the
+    # same reference file.
+    negative_keys = {claim.key for claim in extracted if not claim.expected_exported}
+    grouped: dict[tuple[str, str, str], list[ApiClaim]] = {}
+    for claim in extracted:
+        grouped.setdefault(claim.key, []).append(claim)
+
+    claims: list[ApiClaim] = []
+    for key, group in grouped.items():
+        first = min(group, key=lambda item: item.line)
+        expected_exported = key not in negative_keys
+        regions = {
+            item.expected_region for item in group
+            if item.expected_region is not None and item.expected_exported
+        }
+        expected_region = regions.pop() if expected_exported and len(regions) == 1 else None
+        claims.append(ApiClaim(
+            path=first.path,
+            line=first.line,
+            module=first.module,
+            method=first.method,
+            expected_exported=expected_exported,
+            expected_region=expected_region,
+            raw=first.raw,
+        ))
+
+    claims.sort(key=lambda item: (str(item.path), item.line, item.module, item.method))
+    return ClaimCollection(
+        claims=tuple(claims),
+        occurrences=occurrences,
+        raw_unique=len(raw_keys),
+        ignored_unique=len(ignored_keys),
+        files_with_claims=frozenset(claim.path for claim in claims),
+    )
 
 
-def validate(md_path, src, parse_fn):
-    """Validate one reference file's `Module.Method` mentions against src.
-
-    parse_fn: bsp_api.parse_export_methods — returns
-    [(method_name, region, sig_text, doc_lines), …]. A method is stable iff
-    its region == ПрограммныйИнтерфейс.
-    """
+def evaluate_coverage(
+    collection: ClaimCollection,
+    min_claims: int,
+    min_files: int,
+    min_coverage: float,
+) -> list[str]:
     issues = []
-    for module, method, declared_stable, raw_row in parse_key_methods_table(md_path):
-        bsl_path = find_module_in_src(src, module)
-        if bsl_path is None:
-            issues.append({
-                "file": str(md_path),
-                "module": module,
-                "method": method,
-                "severity": "ERROR",
-                "message": f"module '{module}' not found in src",
-                "row": raw_row,
-            })
-            continue
-        # Parse the real module (all regions, exports only).
-        methods = parse_fn(bsl_path)
-        found = None
-        for m_name, region, _sig, _doc in methods:
-            if m_name == method:
-                found = (region,)
-                break
-        if found is None:
-            issues.append({
-                "file": str(md_path),
-                "module": module,
-                "method": method,
-                "severity": "ERROR",
-                "message": f"method '{module}.{method}' not found as export in {bsl_path}",
-                "row": raw_row,
-            })
-            continue
-        (region,) = found
-        is_stable_actual = (region == STABLE_REGION_NAME)
-        if declared_stable is None:
-            # Reference didn't declare stability — skip region check (we still
-            # confirmed the method exists, which is the main guard against
-            # hallucinated method/module names).
-            continue
-        if declared_stable and not is_stable_actual:
-            severity = "ERROR" if region is None else "WARN"
-            region_label = region or "(вне отслеживаемых областей)"
-            issues.append({
-                "file": str(md_path),
-                "module": module,
-                "method": method,
-                "severity": severity,
-                "message": (
-                    f"declared 'стабильный' but actually in region "
-                    f"'{region_label}' (module: {module})"
-                ),
-                "row": raw_row,
-            })
-        elif not declared_stable and is_stable_actual:
-            issues.append({
-                "file": str(md_path),
-                "module": module,
-                "method": method,
-                "severity": "INFO",
-                "message": (
-                    f"declared 'служебный' but actually in 'ПрограммныйИнтерфейс' "
-                    f"(over-conservative; module: {module})"
-                ),
-                "row": raw_row,
-            })
+    if len(collection.claims) < min_claims:
+        issues.append(
+            f"unique API claims {len(collection.claims)} < required {min_claims}"
+        )
+    if len(collection.files_with_claims) < min_files:
+        issues.append(
+            f"reference files with claims {len(collection.files_with_claims)} "
+            f"< required {min_files}"
+        )
+    if collection.coverage_percent < min_coverage:
+        issues.append(
+            f"classified coverage {collection.coverage_percent:.1f}% "
+            f"< required {min_coverage:.1f}%"
+        )
     return issues
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+def validate_claims(
+    claims: Iterable[ApiClaim],
+    src: Path,
+    parse_fn: Callable[[Path], list[tuple[str, str | None, str, list[str]]]],
+) -> tuple[list[dict[str, str | int]], int]:
+    """Compare claims with exported methods in ``src/CommonModules``."""
+    issues: list[dict[str, str | int]] = []
+    checked = 0
+    module_cache: dict[str, dict[str, set[str | None]] | None] = {}
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Validate key-methods tables against BSP source code")
-    parser.add_argument("--src", required=True,
-                        help="Path to configuration export root (must contain CommonModules/)")
-    parser.add_argument("--skills-dir", default=".claude/skills",
-                        help="Path to skills directory (default: .claude/skills)")
-    parser.add_argument("--strict", action="store_true",
-                        help="Treat INFO-level findings as errors (exit 1)")
+    for claim in claims:
+        if claim.module not in module_cache:
+            bsl_path = src / "CommonModules" / claim.module / "Ext" / "Module.bsl"
+            if not bsl_path.is_file():
+                module_cache[claim.module] = None
+            else:
+                methods: dict[str, set[str | None]] = {}
+                for name, region, _signature, _doc in parse_fn(bsl_path):
+                    methods.setdefault(name, set()).add(region)
+                module_cache[claim.module] = methods
+
+        methods = module_cache[claim.module]
+        regions = None if methods is None else methods.get(claim.method)
+        checked += 1
+
+        if not claim.expected_exported:
+            if regions:
+                issues.append(_issue(
+                    claim,
+                    "ERROR",
+                    "documented as absent/non-exported, but it is an export "
+                    f"in region(s): {', '.join(sorted(r or '(none)' for r in regions))}",
+                ))
+            continue
+
+        if methods is None:
+            issues.append(_issue(claim, "ERROR", "common module not found in src"))
+            continue
+        if not regions:
+            issues.append(_issue(claim, "ERROR", "method not found as an export"))
+            continue
+        if claim.expected_region is not None and claim.expected_region not in regions:
+            actual = ", ".join(sorted(region or "(none)" for region in regions))
+            issues.append(_issue(
+                claim,
+                "ERROR",
+                f"declared region '{claim.expected_region}', actual region(s): {actual}",
+            ))
+        elif claim.expected_region is None and None in regions:
+            issues.append(_issue(
+                claim,
+                "WARN",
+                "export is outside the tracked API regions",
+            ))
+
+    return issues, checked
+
+
+def _issue(claim: ApiClaim, severity: str, message: str) -> dict[str, str | int]:
+    return {
+        "file": str(claim.path),
+        "line": claim.line,
+        "module": claim.module,
+        "method": claim.method,
+        "severity": severity,
+        "message": message,
+    }
+
+
+def _integer_at_least(minimum: int):
+    def parse(value: str) -> int:
+        parsed = int(value)
+        if parsed < minimum:
+            raise argparse.ArgumentTypeError(f"must be at least {minimum}")
+        return parsed
+    return parse
+
+
+def _coverage_percent(value: str) -> float:
+    parsed = float(value)
+    if parsed < DEFAULT_MIN_COVERAGE or parsed > 100:
+        raise argparse.ArgumentTypeError(
+            f"must be between {DEFAULT_MIN_COVERAGE:g} and 100"
+        )
+    return parsed
+
+
+def _print_coverage(collection: ClaimCollection) -> None:
+    print("--- Coverage ---")
+    print(f"Inline occurrences:      {collection.occurrences}")
+    print(f"Unique API-like tokens:  {collection.raw_unique}")
+    print(f"Unique checked claims:   {len(collection.claims)}")
+    print(f"Ignored namespaces:      {collection.ignored_unique}")
+    print(f"Reference files covered: {len(collection.files_with_claims)}")
+    print(f"Classified coverage:     {collection.coverage_percent:.1f}%")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Validate BSP API claims and coverage")
+    parser.add_argument(
+        "--src",
+        help="Path to configuration export root containing CommonModules/",
+    )
+    parser.add_argument(
+        "--skills-dir",
+        default=".claude/skills",
+        help="Skills directory (default: .claude/skills)",
+    )
+    parser.add_argument(
+        "--coverage-only",
+        action="store_true",
+        help="Check extraction/coverage floors without requiring BSP source",
+    )
+    parser.add_argument(
+        "--min-claims",
+        type=_integer_at_least(DEFAULT_MIN_CLAIMS),
+        default=DEFAULT_MIN_CLAIMS,
+    )
+    parser.add_argument(
+        "--min-files",
+        type=_integer_at_least(DEFAULT_MIN_FILES),
+        default=DEFAULT_MIN_FILES,
+    )
+    parser.add_argument(
+        "--min-coverage",
+        type=_coverage_percent,
+        default=DEFAULT_MIN_COVERAGE,
+        help="Required classified percentage, 95 <= value <= 100 (default: 95)",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Treat warnings as errors",
+    )
     args = parser.parse_args()
 
-    src = Path(args.src)
-    if not src.is_dir():
-        print(f"Error: --src path does not exist: {src}", file=sys.stderr)
+    skills_dir = Path(args.skills_dir)
+    references_dir = skills_dir / "bsp" / "references"
+    if not references_dir.is_dir():
+        print(f"Error: references directory not found: {references_dir}", file=sys.stderr)
         sys.exit(2)
-    cm = src / "CommonModules"
-    if not cm.is_dir():
+
+    md_paths = sorted(references_dir.glob("*.md"))
+    collection = collect_claims(md_paths)
+    _print_coverage(collection)
+    coverage_issues = evaluate_coverage(
+        collection,
+        min_claims=args.min_claims,
+        min_files=args.min_files,
+        min_coverage=args.min_coverage,
+    )
+    if coverage_issues:
+        for issue in coverage_issues:
+            print(f"[COVERAGE] {issue}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.coverage_only:
+        print("PASS: coverage floors satisfied.")
+        sys.exit(0)
+
+    if not args.src:
+        print("Error: --src is required unless --coverage-only is used.", file=sys.stderr)
+        sys.exit(2)
+    src = Path(args.src)
+    if not (src / "CommonModules").is_dir():
         print(f"Error: --src has no CommonModules/ subdir: {src}", file=sys.stderr)
         sys.exit(2)
 
-    skills_dir = Path(args.skills_dir)
-    if not skills_dir.is_dir():
-        print(f"Error: --skills-dir not found: {skills_dir}", file=sys.stderr)
+    try:
+        parse_fn = _load_parser(skills_dir)
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(2)
 
-    parse_fn, _bsp_mod = _load_parser(skills_dir)
+    issues, checked = validate_claims(collection.claims, src, parse_fn)
+    errors = [issue for issue in issues if issue["severity"] == "ERROR"]
+    warnings = [issue for issue in issues if issue["severity"] == "WARN"]
+    for issue in issues:
+        print(
+            f"[{issue['severity']}] {issue['file']}:{issue['line']} "
+            f"{issue['module']}.{issue['method']}: {issue['message']}"
+        )
 
-    # Find all *.md files in references/ that contain `Module.Method` mentions.
-    # Only the BSP skill documents common-module exports; other skill
-    # directories use the same `Word.Word` syntax for documentation
-    # cross-references and would produce false positives.
-    md_files = sorted(
-        f for f in skills_dir.glob("*/references/*.md")
-        if f.parent.parent.name in BSP_CLUSTER_DIRS
-    )
+    print("\n--- Semantic validation ---")
+    print(f"Claims checked: {checked}")
+    print(f"ERROR: {len(errors)}")
+    print(f"WARN:  {len(warnings)}")
 
-    print(f"Validating {len(md_files)} reference file(s) from {skills_dir}/bsp "
-          f"against {src}...")
-    all_issues = []
-    total_methods = 0
-    for kmf in md_files:
-        # Count `Module.Method` mentions found in this file.
-        methods_in_file = list(parse_key_methods_table(kmf))
-        if not methods_in_file:
-            continue
-        total_methods += len(methods_in_file)
-        print(f"\n=== {kmf} ({len(methods_in_file)} methods) ===")
-        issues = validate(kmf, src, parse_fn)
-        all_issues.extend(issues)
-        if not issues:
-            print("  OK")
-        else:
-            for iss in issues:
-                sev = iss["severity"]
-                print(f"  [{sev}] {iss['module']}.{iss['method']}: {iss['message']}")
-
-    # Summary
-    errors = [i for i in all_issues if i["severity"] == "ERROR"]
-    warns = [i for i in all_issues if i["severity"] == "WARN"]
-    infos = [i for i in all_issues if i["severity"] == "INFO"]
-    print(f"\n--- Summary ---")
-    print(f"Methods checked: {total_methods}")
-    print(f"  ERROR: {len(errors)}")
-    print(f"  WARN:  {len(warns)}")
-    print(f"  INFO:  {len(infos)}")
-
-    if errors:
-        print("\nFAIL: errors found (see above).", file=sys.stderr)
+    if errors or (args.strict and warnings):
+        print("FAIL: BSP API claims do not match source.", file=sys.stderr)
         sys.exit(1)
-    if args.strict and (warns or infos):
-        print("\nFAIL: --strict mode, warnings/info treated as errors.",
-              file=sys.stderr)
-        sys.exit(1)
-    if warns:
-        print("\nWarnings present (not fatal).")
-    sys.exit(0)
+    print("PASS: BSP API claims match source.")
 
 
 if __name__ == "__main__":
