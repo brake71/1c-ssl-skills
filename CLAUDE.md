@@ -2,14 +2,14 @@
 
 ## Назначение репозитория
 
-Репозиторий разрабатывает единый скил `.claude/skills/bsp/` для применения
+Репозиторий разрабатывает единый скил `skills/bsp/` для применения
 1С:БСП 3.1.11. Скил содержит маршрутизатор `SKILL.md`, 24 тематических
 reference-файла и скрипт проверки API по выгрузке конфигурации.
 
 ## Структура
 
 ```text
-.claude/skills/bsp/
+skills/bsp/
   SKILL.md                 # маршрутизация по задачам
   references/*.md          # сценарии, сигнатуры, примеры, антипаттерны
   scripts/bsp_api.py       # поиск экспортных методов и регионов
@@ -19,9 +19,11 @@ tests/
   fixtures/                # синтетические BSL/Markdown-фикстуры
   test_*.py                # unit-тесты парсера и валидатора
 .github/workflows/         # CI и выпуск архива с единым скилом bsp
+install.sh                 # установка/обновление в Unix-подобных системах
+install.ps1                # установка/обновление в PowerShell
 ```
 
-`.claude/skills/agents-best-practices` — внешний submodule для разработки. Не
+`vendor/agents-best-practices` — внешний submodule для разработки. Не
 редактировать и не обновлять его commit без отдельной задачи. Локальные
 изменения внутри submodule принадлежат пользователю.
 
@@ -93,12 +95,14 @@ python ci/validate_key_methods.py --src src/cf
 Для точечной проверки API использовать:
 
 ```bash
-python .claude/skills/bsp/scripts/bsp_api.py method <ИмяМетода> --module <ИмяМодуля> --src src/cf
-python .claude/skills/bsp/scripts/bsp_api.py module <ИмяМодуля> --src src/cf
-python .claude/skills/bsp/scripts/bsp_api.py modules --src src/cf
+python skills/bsp/scripts/bsp_api.py method <ИмяМетода> --module <ИмяМодуля> --src src/cf
+python skills/bsp/scripts/bsp_api.py module <ИмяМодуля> --src src/cf
+python skills/bsp/scripts/bsp_api.py modules --src src/cf
 ```
 
 ## Релиз
 
-Workflow релиза упаковывает только `.claude/skills/bsp`. README, команды
-установки и примеры должны всегда описывать именно эту структуру.
+Workflow релиза упаковывает `skills/bsp` вместе с обоими установщиками в ZIP и
+tar.gz. README, команды установки и примеры должны всегда описывать именно эту
+структуру. После изменения установщиков выполнять их локальные smoke-тесты с
+`--source` / `-SourceDirectory`, не обращаясь к сети.

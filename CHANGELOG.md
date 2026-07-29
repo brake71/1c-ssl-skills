@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-29 — установка и независимая структура skills (v0.7)
+
+- Публичный скил перенесён из `.claude/skills/bsp` в независимый от harness
+  каталог `skills/bsp`; внешний development-submodule перенесён в `vendor/`.
+- Добавлены идемпотентные установщики `install.sh` и `install.ps1` для
+  установки и обновления в Claude Code, Codex, OpenCode или произвольный
+  каталог.
+- CI и release workflow обновлены под новую структуру, smoke-тесты установщиков
+  и выпуск ZIP/tar.gz архивов.
+
 ## 2026-07-21 — инфраструктура единого BSP-скила (v0.6)
 
 - README и CLAUDE.md синхронизированы с единым `.claude/skills/bsp` после

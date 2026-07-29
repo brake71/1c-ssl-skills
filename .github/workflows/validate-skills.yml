@@ -3,14 +3,18 @@ name: Validate BSP skills
 on:
   push:
     paths:
-      - '.claude/skills/**'
+      - 'skills/**'
+      - 'install.sh'
+      - 'install.ps1'
       - 'ci/**'
       - 'tests/**'
       - '.gitmodules'
       - '.github/workflows/validate-skills.yml'
   pull_request:
     paths:
-      - '.claude/skills/**'
+      - 'skills/**'
+      - 'install.sh'
+      - 'install.ps1'
       - 'ci/**'
       - 'tests/**'
       - '.gitmodules'
@@ -32,7 +36,7 @@ jobs:
 
       - name: Validate skill scripts compile
         run: |
-          python -m py_compile .claude/skills/bsp/scripts/bsp_api.py
+          python -m py_compile skills/bsp/scripts/bsp_api.py
           python -m py_compile ci/validate_key_methods.py
 
       - name: Run parser and validator tests
@@ -45,7 +49,7 @@ jobs:
         run: |
           # Script must fail with exit 2 when --src is missing
           set +e
-          python .claude/skills/bsp/scripts/bsp_api.py method СообщитьПользователю
+          python skills/bsp/scripts/bsp_api.py method СообщитьПользователю
           rc=$?
           if [ "$rc" -ne 2 ]; then
             echo "FAIL: expected exit 2 for missing --src, got $rc"
@@ -58,13 +62,37 @@ jobs:
           # Verify the script forces UTF-8 output (no mojibake on any platform)
           python -c "
           import importlib.util
-          path = '.claude/skills/bsp/scripts/bsp_api.py'
+          path = 'skills/bsp/scripts/bsp_api.py'
           spec = importlib.util.spec_from_file_location('m', path)
           m = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(m)
           # If we got here without error, the UTF-8 reconfigure block ran
           print(f'OK: {path}')
           "
+
+      - name: Smoke test Bash installer
+        run: |
+          bash -n install.sh
+          bash install.sh --source "$PWD" --target "$RUNNER_TEMP/bash-skills"
+          diff -qr skills/bsp "$RUNNER_TEMP/bash-skills/bsp"
+          bash install.sh --source "$PWD" --target "$RUNNER_TEMP/bash-skills"
+
+      - name: Smoke test PowerShell installer
+        shell: pwsh
+        run: |
+          ./install.ps1 -SourceDirectory $PWD -Target "$env:RUNNER_TEMP/pwsh-skills"
+          $sourceRoot = (Resolve-Path skills/bsp).Path
+          $installedRoot = (Resolve-Path "$env:RUNNER_TEMP/pwsh-skills/bsp").Path
+          $sourceFiles = Get-ChildItem $sourceRoot -Recurse -File | ForEach-Object {
+            "$($_.FullName.Substring($sourceRoot.Length))=$((Get-FileHash $_.FullName).Hash)"
+          } | Sort-Object
+          $installedFiles = Get-ChildItem $installedRoot -Recurse -File | ForEach-Object {
+            "$($_.FullName.Substring($installedRoot.Length))=$((Get-FileHash $_.FullName).Hash)"
+          } | Sort-Object
+          if (Compare-Object $sourceFiles $installedFiles) {
+            throw "PowerShell installer output differs from skills/bsp"
+          }
+          ./install.ps1 -SourceDirectory $PWD -Target "$env:RUNNER_TEMP/pwsh-skills"
 
       # NOTE: Semantic validation requires the BSP configuration export
       # (src/cf/), which is in .gitignore and not available in CI. Extraction

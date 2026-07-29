@@ -7,7 +7,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_PATH = REPO_ROOT / "ci" / "validate_key_methods.py"
-API_PATH = REPO_ROOT / ".claude" / "skills" / "bsp" / "scripts" / "bsp_api.py"
+API_PATH = REPO_ROOT / "skills" / "bsp" / "scripts" / "bsp_api.py"
 FIXTURE_SRC = REPO_ROOT / "tests" / "fixtures" / "cf"
 VALID_REFERENCE = REPO_ROOT / "tests" / "fixtures" / "references" / "valid.md"
 

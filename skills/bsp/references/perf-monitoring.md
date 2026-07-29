@@ -435,4 +435,4 @@
   буфер; используйте стабильный `ЦентрМониторинга.ЗаписатьОперациюБизнесСтатистики`.
 
 Для поиска сигнатуры/региона любого из этих методов —
-`python .claude/skills/bsp/scripts/bsp_api.py method <Имя> --module <Модуль> --src src/cf`.
+`python skills/bsp/scripts/bsp_api.py method <Имя> --module <Модуль> --src src/cf`.

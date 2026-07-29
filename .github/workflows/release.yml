@@ -14,15 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Pack BSP skill
+      - name: Pack BSP skill and installers
         run: |
-          ARCHIVE_NAME="bsp-skills-${{ github.ref_name }}.zip"
-          zip -r "$ARCHIVE_NAME" \
-            .claude/skills/bsp
-          echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_ENV"
+          ZIP_NAME="bsp-skill-${{ github.ref_name }}.zip"
+          TAR_NAME="bsp-skill-${{ github.ref_name }}.tar.gz"
+          zip -r "$ZIP_NAME" skills/bsp install.sh install.ps1
+          tar -czf "$TAR_NAME" skills/bsp install.sh install.ps1
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_ENV"
+          echo "tar_name=$TAR_NAME" >> "$GITHUB_ENV"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.archive_name }}
+          files: |
+            ${{ env.zip_name }}
+            ${{ env.tar_name }}
           generate_release_notes: true

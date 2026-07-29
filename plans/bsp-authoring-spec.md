@@ -3,10 +3,10 @@
 Единый регламент для субагентов, авторящих `references/*.md` скила БСП.
 Источник формата — `plans/piped-humming-sutherland.md` (раздел «Шаблон
 workflow-сценария в references», строки ~179-227). Эталон реализации —
-`.claude/skills/bsp/references/base-common.md` (прочитай его первым делом и
+`skills/bsp/references/base-common.md` (прочитай его первым делом и
 калибруйся по нему).
 
-Рабочий каталог: `E:\gitReps\1c-ssl-skills`. Пиши в `.claude/skills/bsp/references/<имя>.md`.
+Рабочий каталог: `E:\gitReps\1c-ssl-skills`. Пиши в `skills/bsp/references/<имя>.md`.
 
 ## 0. Главная цель
 
@@ -32,7 +32,7 @@ Reference учит **правильно применять** БСП в прик�
      `Пример вызова`, `Доступность`.
 3. **Исходник** — `src/cf/CommonModules/<Модуль>/Ext/Module.bsl` —
    **авторитетен для сигнатур/регионов**. Через скрипт:
-   `python .claude/skills/bsp/scripts/bsp_api.py method <Имя> [--module <Модуль>] --src src/cf`
+   `python skills/bsp/scripts/bsp_api.py method <Имя> [--module <Модуль>] --src src/cf`
    и `... module <Модуль> --src src/cf`.
 4. **Если дока и исходник расходятся** — приоритет у исходника для сигнатур;
    для поведения/назначения сверяй оба. Расхождение — отмечай в «Нюансах».
@@ -136,9 +136,9 @@ Reference учит **правильно применять** БСП в прик�
 
 Перед завершением выполни (все должны быть 0):
 ```bash
-grep -rn "bsp3111_md/" .claude/skills/bsp/references/<файл>.md   # 0
-grep -rPn "src/cf/.+:\d+" .claude/skills/bsp/references/<файл>.md  # 0 (нет :NNN)
-grep -rn "bsp321_md\|bsp3111" .claude/skills/bsp/references/<файл>.md  # 0
+grep -rn "bsp3111_md/" skills/bsp/references/<файл>.md   # 0
+grep -rPn "src/cf/.+:\d+" skills/bsp/references/<файл>.md  # 0 (нет :NNN)
+grep -rn "bsp321_md\|bsp3111" skills/bsp/references/<файл>.md  # 0
 ```
 - Параметры всех ключевых методов — inline (не «см. дока-файл»).
 - Примеры — inline в ```bsl блоках.

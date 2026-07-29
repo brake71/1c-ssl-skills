@@ -439,4 +439,4 @@
   — реализовать произвольные команды, привязанные к объекту метаданных.
 
 Для поиска сигнатур/регионов любого метода —
-`python .claude/skills/bsp/scripts/bsp_api.py method <Имя> --module <Модуль> --src src/cf`.
+`python skills/bsp/scripts/bsp_api.py method <Имя> --module <Модуль> --src src/cf`.

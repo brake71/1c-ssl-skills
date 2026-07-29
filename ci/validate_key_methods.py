@@ -386,8 +386,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--skills-dir",
-        default=".claude/skills",
-        help="Skills directory (default: .claude/skills)",
+        default="skills",
+        help="Skills directory (default: skills)",
     )
     parser.add_argument(
         "--coverage-only",
