@@ -1,0 +1,4 @@
+interface:
+  display_name: "1С:БСП 3.1.11"
+  short_description: "Публичный API и паттерны БСП для 1С"
+  default_prompt: "Используй $bsp, чтобы подобрать публичный API БСП 3.1.11 и написать корректный BSL-код."

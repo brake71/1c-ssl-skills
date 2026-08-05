@@ -11,10 +11,13 @@ reference-файла и скрипт проверки API по выгрузке 
 ```text
 skills/bsp/
   SKILL.md                 # маршрутизация по задачам
+  agents/openai.yaml       # UI-метаданные и стартовый prompt для Codex
   references/*.md          # сценарии, сигнатуры, примеры, антипаттерны
   scripts/bsp_api.py       # поиск экспортных методов и регионов
 ci/
   validate_key_methods.py  # проверка API-утверждений и покрытия
+  run_skill_evals.py       # RED/GREEN поведенческие прогоны через cdx
+evals/cases.json           # корпус пользовательских сценариев
 tests/
   fixtures/                # синтетические BSL/Markdown-фикстуры
   test_*.py                # unit-тесты парсера и валидатора
@@ -83,10 +86,23 @@ src/cf/      # XML-выгрузка конфигурации БСП 3.1.11
 python -m unittest discover -s tests -v
 python ci/validate_key_methods.py --coverage-only
 python ci/validate_key_methods.py --src src/cf
+python ci/run_skill_evals.py --dry-run
 ```
 
 Если `src/cf/` отсутствует, выполнить первые две команды и явно сообщить, что
 полная семантическая проверка не запускалась.
+
+Для поведенческой проверки сначала выполнить быстрый RED/GREEN-прогон одного
+сценария через `cdx`, затем перед релизом полный прогон с тремя повторами:
+
+```bash
+python ci/run_skill_evals.py --case message-bound-to-field --runs 1
+python ci/run_skill_evals.py --runs 3
+```
+
+Runner не должен изменять глобальные скилы. GREEN staging разрешён только в
+`<dir>/.agents/skills/bsp`; существующий каталог с таким именем нельзя
+перезаписывать.
 
 Порог покрытия обязателен: не снижать `--min-claims`, `--min-files` или
 `--min-coverage` для обхода ошибки. Сначала исправить извлечение утверждений или

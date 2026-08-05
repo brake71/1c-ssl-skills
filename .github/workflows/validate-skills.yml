@@ -45,6 +45,11 @@ jobs:
       - name: Enforce API claim coverage
         run: python ci/validate_key_methods.py --coverage-only
 
+      - name: Validate behavioral eval corpus and harness
+        run: >-
+          python ci/run_skill_evals.py --dry-run --cdx python
+          --dir . --bsl-src tests/fixtures/cf
+
       - name: Validate skill scripts run (--src required)
         run: |
           # Script must fail with exit 2 when --src is missing

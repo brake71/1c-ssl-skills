@@ -18,7 +18,7 @@ curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.
 Для других агентов:
 
 ```bash
-# Codex: ~/.codex/skills/bsp
+# Codex: ~/.agents/skills/bsp
 curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --agent codex
 
 # OpenCode: ~/.config/opencode/skills/bsp
@@ -124,12 +124,37 @@ reference-файлы остаются пригодны для использов
 python -m unittest discover -s tests -v
 python ci/validate_key_methods.py --coverage-only
 python ci/validate_key_methods.py --src src/cf
+python ci/run_skill_evals.py --dry-run
 ```
 
 CI также проверяет компиляцию скриптов, обязательность `--src`, покрытие
 references и локальные smoke-тесты обоих установщиков. Полная семантическая
 проверка требует локальную выгрузку БСП и поэтому выполняется перед релизом
 локально.
+
+### Поведенческий RED/GREEN-тест
+
+Статические проверки подтверждают содержимое справочников, но не активацию
+скила и качество ответа агента. Для этого используется корпус
+`evals/cases.json` и запуск Codex через команду `cdx`:
+
+```bash
+# Быстрый прогон одного сценария: без скила и со скилом.
+python ci/run_skill_evals.py --case message-bound-to-field --runs 1
+
+# Полный релизный прогон; три повтора уменьшают влияние дрейфа модели.
+python ci/run_skill_evals.py --runs 3
+```
+
+RED и GREEN выполняются в одном каталоге `src/`. В GREEN runner временно
+устанавливает только `bsp` в `src/.agents/skills/bsp`, а затем удаляет staging.
+Глобальные каталоги скилов не изменяются. Сырые JSONL-события, ответы и отчёт
+сохраняются в `.tmp/bsp-evals/`.
+
+Основные метрики: доля прошедших сценариев, неявная активация по наблюдаемому
+чтению staged `SKILL.md`/reference в JSONL-трейсе, точность методов, вызовы
+служебного API и модулей `*Переопределяемый`, запрещённые антипаттерны и расход
+токенов. Ненулевой код означает, что GREEN не достиг заданных порогов.
 
 ## Лицензия
 

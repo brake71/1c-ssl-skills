@@ -29,8 +29,7 @@ if ([string]::IsNullOrWhiteSpace($Target)) {
             Join-Path $configRoot "skills"
         }
         "Codex" {
-            $configRoot = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $userHome ".codex" }
-            Join-Path $configRoot "skills"
+            Join-Path $userHome ".agents\skills"
         }
         "OpenCode" {
             $configRoot = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $userHome ".config" }

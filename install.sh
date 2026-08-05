@@ -73,7 +73,7 @@ case "$agent_lower" in
     default_target="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
     ;;
   codex)
-    default_target="${CODEX_HOME:-$HOME/.codex}/skills"
+    default_target="$HOME/.agents/skills"
     ;;
   opencode)
     default_target="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills"
