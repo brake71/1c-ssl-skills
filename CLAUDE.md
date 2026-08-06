@@ -97,8 +97,12 @@ python ci/run_skill_evals.py --dry-run
 
 ```bash
 python ci/run_skill_evals.py --case message-bound-to-field --runs 1
-python ci/run_skill_evals.py --runs 3
+python ci/run_skill_evals.py --runs 3 --jobs 6
 ```
+
+`--jobs` ограничивает число одновременных запусков `cdx`; каждый запуск
+использует отдельные файлы артефактов, а общий GREEN staging остаётся только
+для чтения.
 
 Runner не должен изменять глобальные скилы. GREEN staging разрешён только в
 `<dir>/.agents/skills/bsp`; существующий каталог с таким именем нельзя

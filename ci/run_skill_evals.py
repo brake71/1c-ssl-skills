@@ -19,11 +19,12 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Callable, Iterable, Iterator
 
 
 for _stream in (sys.stdout, sys.stderr):
@@ -51,10 +52,13 @@ CALL_RE = re.compile(
 )
 BSL_FENCE_RE = re.compile(r"```(?:bsl|1c)?\s*\n(?P<code>.*?)```", re.I | re.S)
 NEGATIVE_BLOCK_RE = re.compile(
-    r"(?:не\s+следует|не\s+вызыва|нельзя|неправиль|ошибочн|невер|"
+    r"(?:не\s+(?:следует|вызыва|существ|нужно|запуска|команд|долж|явля|подход)|"
+    r"(?:публичн|метод|модул|вызов)[^.\n]{0,120}\bнет\b|нельзя|"
+    r"неправиль|ошибочн|невер|ложн|"
     r"антипаттерн|запрещ)",
     re.I,
 )
+NEGATIVE_CONNECTOR_RE = re.compile(r"^(?:или|либо|и|or|and)\s*[:;,.]?$", re.I)
 
 
 class EvalError(RuntimeError):
@@ -247,10 +251,10 @@ def bsl_blocks(response: str) -> list[str]:
 
 def executable_bsl_blocks(response: str) -> list[str]:
     """Exclude fenced snippets explicitly presented as incorrect examples."""
-    result = []
     matches = list(BSL_FENCE_RE.finditer(response))
     if not matches:
         return bsl_blocks(response)
+    negative = []
     for match in matches:
         prefix = response[max(0, match.start() - 240):match.start()]
         immediate_prefix = re.split(r"\n\s*\n", prefix.rstrip())[-1]
@@ -258,14 +262,31 @@ def executable_bsl_blocks(response: str) -> list[str]:
         immediate_suffix = re.split(r"\n\s*\n", suffix.lstrip())[0]
         code = match.group("code")
         first_lines = "\n".join(code.splitlines()[:3])
-        if (
+        negative.append(bool(
             NEGATIVE_BLOCK_RE.search(immediate_prefix)
             or NEGATIVE_BLOCK_RE.search(immediate_suffix)
             or NEGATIVE_BLOCK_RE.search(first_lines)
-        ):
-            continue
-        result.append(code)
-    return result
+        ))
+
+    # Propagate negative context across adjacent alternatives such as
+    # ``bad_call_one(...)`` / "или" / ``bad_call_two(...)``.
+    changed = True
+    while changed:
+        changed = False
+        for index in range(len(matches) - 1):
+            bridge = response[matches[index].end():matches[index + 1].start()].strip()
+            if NEGATIVE_CONNECTOR_RE.fullmatch(bridge) and (
+                negative[index] or negative[index + 1]
+            ):
+                if not negative[index] or not negative[index + 1]:
+                    negative[index] = negative[index + 1] = True
+                    changed = True
+
+    return [
+        match.group("code")
+        for match, is_negative in zip(matches, negative)
+        if not is_negative
+    ]
 
 
 def normalize_member_access(text: str) -> str:
@@ -493,6 +514,50 @@ def majority(values: Iterable[bool]) -> bool:
     return sum(items) >= (len(items) // 2 + 1)
 
 
+def execute_run_matrix(
+    cases: list[EvalCase],
+    runs: int,
+    jobs: int,
+    execute: Callable[[EvalCase, int], dict],
+    on_case_complete: Callable[[int, list[list[dict | None]]], None] | None = None,
+) -> list[list[dict]]:
+    """Execute independent case runs concurrently and preserve corpus order."""
+    matrix: list[list[dict | None]] = [[None] * runs for _ in cases]
+    max_workers = min(jobs, len(cases) * runs)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(execute, case, run_number): (case_index, run_number - 1)
+            for case_index, case in enumerate(cases)
+            for run_number in range(1, runs + 1)
+        }
+        for future in as_completed(futures):
+            case_index, run_index = futures[future]
+            matrix[case_index][run_index] = future.result()
+            if on_case_complete and all(matrix[case_index]):
+                on_case_complete(case_index, matrix)
+    return [[run for run in case_runs if run is not None] for case_runs in matrix]
+
+
+def phase_case_records(
+    cases: list[EvalCase], run_matrix: list[list[dict | None]], expected_runs: int
+) -> list[dict]:
+    """Build ordered report records for cases whose runs are complete."""
+    records = []
+    for case, raw_runs in zip(cases, run_matrix):
+        if len(raw_runs) != expected_runs or any(run is None for run in raw_runs):
+            continue
+        case_runs = [run for run in raw_runs if run is not None]
+        records.append({
+            "id": case.id,
+            "reference": case.reference,
+            "should_trigger": case.should_trigger,
+            "majority_passed": majority(run["score"]["passed"] for run in case_runs),
+            "majority_activated": majority(run["skill_activated"] for run in case_runs),
+            "runs": case_runs,
+        })
+    return records
+
+
 def summarize_phase(cases: list[dict]) -> dict:
     passed_cases = sum(case["majority_passed"] for case in cases)
     trigger_cases = [case for case in cases if case["should_trigger"]]
@@ -551,6 +616,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional model_reasoning_effort override",
     )
     parser.add_argument("--runs", type=int, default=3, help="Runs per case and phase")
+    parser.add_argument(
+        "--jobs", type=int, default=6,
+        help="Maximum concurrent cdx invocations (default: 6)",
+    )
     parser.add_argument("--phase", choices=("red", "green", "both"), default="both")
     parser.add_argument("--timeout", type=int, default=600, help="Seconds per cdx invocation")
     parser.add_argument("--output", help="Report JSON path; artifacts are stored beside it")
@@ -566,6 +635,8 @@ def main() -> None:
     try:
         if args.runs < 1:
             raise EvalError("--runs must be at least 1")
+        if args.jobs < 1:
+            raise EvalError("--jobs must be at least 1")
         for name, value in (
             ("--min-pass-rate", args.min_pass_rate),
             ("--min-activation-rate", args.min_activation_rate),
@@ -627,41 +698,37 @@ def main() -> None:
             "bsl_src": str(bsl_src) if bsl_src else None,
             "selected_cases": [case.id for case in cases],
             "runs": args.runs,
+            "jobs": args.jobs,
             "complete": False,
             "phases": {},
             "report_path": str(report_path),
         }
 
         for phase in phases:
-            phase_cases = []
             context = staged_skill(skill_dir, stage_target) if phase == "green" else _null_context()
             with context:
-                for case in cases:
-                    case_runs = []
-                    for run_number in range(1, args.runs + 1):
-                        print(f"[{phase.upper()}] {case.id} run {run_number}/{args.runs}", flush=True)
-                        execution = run_cdx(
-                            cdx, case, workdir, artifact_dir, phase, run_number,
-                            args.model, args.reasoning_effort, args.timeout, skill_name,
-                        )
-                        execution["score"] = score_response(
-                            case,
-                            execution["response"],
-                            method_index,
-                            skill_activated=execution["skill_activated"],
-                            require_activation=phase == "green",
-                        )
-                        case_runs.append(execution)
-                    phase_cases.append({
-                        "id": case.id,
-                        "reference": case.reference,
-                        "should_trigger": case.should_trigger,
-                        "majority_passed": majority(run["score"]["passed"] for run in case_runs),
-                        "majority_activated": majority(
-                            run["skill_activated"] for run in case_runs
-                        ),
-                        "runs": case_runs,
-                    })
+                def execute(case: EvalCase, run_number: int) -> dict:
+                    print(
+                        f"[{phase.upper()}] {case.id} run {run_number}/{args.runs}",
+                        flush=True,
+                    )
+                    execution = run_cdx(
+                        cdx, case, workdir, artifact_dir, phase, run_number,
+                        args.model, args.reasoning_effort, args.timeout, skill_name,
+                    )
+                    execution["score"] = score_response(
+                        case,
+                        execution["response"],
+                        method_index,
+                        skill_activated=execution["skill_activated"],
+                        require_activation=phase == "green",
+                    )
+                    return execution
+
+                def save_progress(
+                    _case_index: int, matrix: list[list[dict | None]]
+                ) -> None:
+                    phase_cases = phase_case_records(cases, matrix, args.runs)
                     report["phases"][phase] = {
                         "cases": phase_cases,
                         "summary": summarize_phase(phase_cases),
@@ -671,6 +738,11 @@ def main() -> None:
                         json.dumps(report, ensure_ascii=False, indent=2),
                         encoding="utf-8",
                     )
+
+                run_matrix = execute_run_matrix(
+                    cases, args.runs, args.jobs, execute, save_progress
+                )
+                phase_cases = phase_case_records(cases, run_matrix, args.runs)
             report["phases"][phase] = {
                 "cases": phase_cases,
                 "summary": summarize_phase(phase_cases),

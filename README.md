@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.
 Чтобы установить конкретный тег или коммит, передайте `--ref`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.7
+curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.8
 ```
 
 Если не хочется выполнять загруженный код через pipe, сначала сохраните и
@@ -59,7 +59,7 @@ irm https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.ps1 -Ou
 .\install.ps1 -Agent Codex
 .\install.ps1 -Agent OpenCode
 .\install.ps1 -Target C:\path\to\skills
-.\install.ps1 -Agent Codex -Ref v0.7
+.\install.ps1 -Agent Codex -Ref v0.8
 Remove-Item .\install.ps1
 ```
 
@@ -143,8 +143,11 @@ references и локальные smoke-тесты обоих установщи�
 python ci/run_skill_evals.py --case message-bound-to-field --runs 1
 
 # Полный релизный прогон; три повтора уменьшают влияние дрейфа модели.
-python ci/run_skill_evals.py --runs 3
+python ci/run_skill_evals.py --runs 3 --jobs 6
 ```
+
+`--jobs` задаёт предельное число одновременных запусков `cdx`; значение `6`
+сокращает длительность полного прогона, не меняя число повторов и пороги.
 
 RED и GREEN выполняются в одном каталоге `src/`. В GREEN runner временно
 устанавливает только `bsp` в `src/.agents/skills/bsp`, а затем удаляет staging.

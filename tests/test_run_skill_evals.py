@@ -2,6 +2,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -131,6 +132,56 @@ class ResponseScoringTests(unittest.TestCase):
         self.assertTrue(score["passed"])
         self.assertEqual(score["invalid_methods"], [])
 
+    def test_real_negative_phrasings_are_not_executable_recommendations(self):
+        examples = (
+            (
+                "Ложный очевидный API:",
+                "",
+            ),
+            (
+                "Не существует публичного вызова вида:",
+                "",
+            ),
+            (
+                "Серверного публичного метода нет. В частности:",
+                "— этот метод не запускает операцию.",
+            ),
+            (
+                "Прямого вызова вида:",
+                "в прикладном коде быть не должно.",
+            ),
+        )
+        for prefix, suffix in examples:
+            with self.subTest(prefix=prefix, suffix=suffix):
+                response = (
+                    "Правильный вариант:\n"
+                    "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```\n\n"
+                    f"{prefix}\n"
+                    "```bsl\nТестовыйМодуль.СлужебныйМетод();\n```\n"
+                    f"{suffix}"
+                )
+                score = runner.score_response(self.case, response, self.method_index)
+                self.assertTrue(score["passed"])
+                self.assertEqual(score["unsafe_calls"], [])
+
+    def test_negative_context_propagates_across_or_alternatives(self):
+        response = (
+            "Правильный вариант:\n"
+            "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```\n\n"
+            "Очевидный вызов вида:\n"
+            "```bsl\nТестовыйМодуль.СлужебныйМетод();\n```\n\n"
+            "или\n\n"
+            "```bsl\nТестовыйМодуль.СлужебныйМетод();\n```\n\n"
+            "Таких публичных методов нет."
+        )
+        score = runner.score_response(self.case, response, self.method_index)
+        self.assertTrue(score["passed"])
+        self.assertEqual(score["unsafe_calls"], [])
+        self.assertEqual(
+            runner.executable_bsl_blocks(response),
+            ["ТестовыйМодуль.СтабильныйМетод();\n"],
+        )
+
     def test_member_call_split_across_lines_is_detected(self):
         response = "```bsl\nТестовыйМодуль\n    .СтабильныйМетод();\n```"
         score = runner.score_response(self.case, response, self.method_index)
@@ -195,6 +246,60 @@ class StagingTests(unittest.TestCase):
             with self.assertRaisesRegex(runner.EvalError, "overwrite"):
                 with runner.staged_skill(SKILL_DIR, target):
                     pass
+
+
+class ParallelExecutionTests(unittest.TestCase):
+    @staticmethod
+    def _case(case_id):
+        return runner.EvalCase(
+            id=case_id,
+            task="test",
+            reference=None,
+            should_trigger=True,
+            requires_bsl=False,
+            required_patterns=(),
+            forbidden_patterns=(),
+            activation_patterns=(),
+        )
+
+    def test_run_matrix_is_concurrent_and_preserves_order(self):
+        cases = [self._case("first"), self._case("second")]
+        barrier = threading.Barrier(2)
+        completed = []
+
+        def execute(case, run_number):
+            barrier.wait(timeout=2)
+            return {"case": case.id, "run": run_number}
+
+        def on_case_complete(case_index, _matrix):
+            completed.append(case_index)
+
+        matrix = runner.execute_run_matrix(
+            cases, runs=2, jobs=2, execute=execute,
+            on_case_complete=on_case_complete,
+        )
+
+        self.assertEqual(
+            matrix,
+            [
+                [{"case": "first", "run": 1}, {"case": "first", "run": 2}],
+                [{"case": "second", "run": 1}, {"case": "second", "run": 2}],
+            ],
+        )
+        self.assertCountEqual(completed, [0, 1])
+
+    def test_phase_records_skip_incomplete_cases(self):
+        cases = [self._case("first"), self._case("second")]
+        passing = {
+            "score": {"passed": True},
+            "skill_activated": True,
+        }
+        records = runner.phase_case_records(
+            cases,
+            [[passing, passing], [passing, None]],
+            expected_runs=2,
+        )
+        self.assertEqual([record["id"] for record in records], ["first"])
 
 
 if __name__ == "__main__":

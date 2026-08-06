@@ -2,23 +2,32 @@ name: Validate BSP skills
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'skills/**'
+      - 'evals/**'
       - 'install.sh'
       - 'install.ps1'
       - 'ci/**'
       - 'tests/**'
+      - 'CLAUDE.md'
       - '.gitmodules'
+      - '.github/workflows/release.yml'
       - '.github/workflows/validate-skills.yml'
   pull_request:
     paths:
       - 'skills/**'
+      - 'evals/**'
       - 'install.sh'
       - 'install.ps1'
       - 'ci/**'
       - 'tests/**'
+      - 'CLAUDE.md'
       - '.gitmodules'
+      - '.github/workflows/release.yml'
       - '.github/workflows/validate-skills.yml'
+  workflow_call:
 
 jobs:
   validate:

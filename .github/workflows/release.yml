@@ -6,11 +6,17 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  validate:
+    uses: ./.github/workflows/validate-skills.yml
+
   release:
+    needs: validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
