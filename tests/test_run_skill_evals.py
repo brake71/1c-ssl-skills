@@ -84,6 +84,43 @@ class JsonlTests(unittest.TestCase):
         self.assertEqual(runner.skill_activation_evidence(events, "bsp"), [])
 
 
+class CdxCommandTests(unittest.TestCase):
+    def setUp(self):
+        self.case = runner.EvalCase(
+            id="test",
+            task="Задача",
+            reference=None,
+            should_trigger=True,
+            requires_bsl=False,
+            required_patterns=(),
+            forbidden_patterns=(),
+            activation_patterns=(),
+        )
+
+    def test_windows_enables_sandbox_when_user_config_is_ignored(self):
+        command = runner.build_cdx_command(
+            "cdx", self.case, Path("C:/work"), None, None, platform_name="nt"
+        )
+        self.assertIn("--ignore-user-config", command)
+        self.assertIn('windows.sandbox="unelevated"', command)
+
+    def test_non_windows_does_not_receive_windows_config(self):
+        command = runner.build_cdx_command(
+            "cdx", self.case, Path("/work"), None, None, platform_name="posix"
+        )
+        self.assertNotIn('windows.sandbox="unelevated"', command)
+
+    def test_luna_is_the_default_eval_model(self):
+        args = runner.build_parser().parse_args([])
+        self.assertEqual(args.model, "gpt-5.6-luna")
+        command = runner.build_cdx_command(
+            "cdx", self.case, Path("/work"), args.model, None,
+            platform_name="posix",
+        )
+        model_index = command.index("--model")
+        self.assertEqual(command[model_index + 1], "gpt-5.6-luna")
+
+
 class ResponseScoringTests(unittest.TestCase):
     def setUp(self):
         self.case = runner.EvalCase(
@@ -246,6 +283,28 @@ class StagingTests(unittest.TestCase):
             with self.assertRaisesRegex(runner.EvalError, "overwrite"):
                 with runner.staged_skill(SKILL_DIR, target):
                     pass
+
+
+class SummaryTests(unittest.TestCase):
+    def test_policy_block_is_an_infrastructure_failure(self):
+        cases = [{
+            "should_trigger": True,
+            "majority_passed": False,
+            "majority_activated": False,
+            "runs": [{
+                "returncode": 0,
+                "tool_policy_blocked": True,
+                "usage": {},
+                "score": {
+                    "invalid_methods": [],
+                    "unsafe_calls": [],
+                    "forbidden_hits": [],
+                },
+            }],
+        }]
+        summary = runner.summarize_phase(cases)
+        self.assertEqual(summary["failed_processes"], 1)
+        self.assertEqual(summary["tool_policy_blocks"], 1)
 
 
 class ParallelExecutionTests(unittest.TestCase):

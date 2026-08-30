@@ -41,6 +41,7 @@ DEFAULT_CASES = REPO_ROOT / "evals" / "cases.json"
 DEFAULT_SKILL = REPO_ROOT / "skills" / "bsp"
 DEFAULT_WORKDIR = REPO_ROOT / "src"
 DEFAULT_BSL_SRC = REPO_ROOT / "src" / "cf"
+DEFAULT_MODEL = "gpt-5.6-luna"
 SERVICE_REGIONS = frozenset({
     "СлужебныйПрограммныйИнтерфейс",
     "СлужебныеПроцедурыИФункции",
@@ -428,6 +429,41 @@ def staged_skill(skill_dir: Path, target: Path) -> Iterator[None]:
             agents_dir.rmdir()
 
 
+def build_cdx_command(
+    cdx: str,
+    case: EvalCase,
+    workdir: Path,
+    model: str | None,
+    reasoning_effort: str | None,
+    *,
+    platform_name: str | None = None,
+) -> list[str]:
+    platform_name = platform_name or os.name
+    command = [
+        cdx,
+        "exec",
+        "--json",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--sandbox",
+        "read-only",
+    ]
+    if platform_name == "nt":
+        # With user config ignored, Codex has no Windows sandbox backend and
+        # fails closed by rejecting even read-only shell commands. Select the
+        # restricted-token backend explicitly while keeping evals isolated
+        # from all other user settings.
+        command.extend(["-c", 'windows.sandbox="unelevated"'])
+    command.extend(["-C", str(workdir)])
+    if model:
+        command.extend(["--model", model])
+    if reasoning_effort:
+        command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
+    command.append(case.task)
+    return command
+
+
 def run_cdx(
     cdx: str,
     case: EvalCase,
@@ -440,23 +476,7 @@ def run_cdx(
     timeout: int,
     skill_name: str,
 ) -> dict:
-    command = [
-        cdx,
-        "exec",
-        "--json",
-        "--ephemeral",
-        "--ignore-user-config",
-        "--ignore-rules",
-        "--sandbox",
-        "read-only",
-        "-C",
-        str(workdir),
-    ]
-    if model:
-        command.extend(["--model", model])
-    if reasoning_effort:
-        command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
-    command.append(case.task)
+    command = build_cdx_command(cdx, case, workdir, model, reasoning_effort)
 
     started = time.monotonic()
     try:
@@ -494,10 +514,12 @@ def run_cdx(
     events, noise = extract_jsonl(stdout)
     response = final_message(events)
     activation_evidence = skill_activation_evidence(events, skill_name)
+    tool_policy_blocked = "blocked by policy" in stderr
     (artifact_dir / f"{prefix}.response.md").write_text(response, encoding="utf-8")
     return {
         "returncode": returncode,
         "timed_out": timed_out,
+        "tool_policy_blocked": tool_policy_blocked,
         "elapsed_seconds": round(elapsed, 3),
         "usage": usage_from_events(events),
         "response": response,
@@ -575,7 +597,13 @@ def summarize_phase(cases: list[dict]) -> dict:
         "invalid_methods": sum(len(run["score"]["invalid_methods"]) for run in runs),
         "unsafe_calls": sum(len(run["score"]["unsafe_calls"]) for run in runs),
         "forbidden_hits": sum(len(run["score"]["forbidden_hits"]) for run in runs),
-        "failed_processes": sum(run["returncode"] != 0 for run in runs),
+        "failed_processes": sum(
+            run["returncode"] != 0 or run.get("tool_policy_blocked", False)
+            for run in runs
+        ),
+        "tool_policy_blocks": sum(
+            run.get("tool_policy_blocked", False) for run in runs
+        ),
         "input_tokens": sum(input_tokens),
         "output_tokens": sum(output_tokens),
     }
@@ -592,7 +620,9 @@ def print_summary(report: dict) -> None:
             f"{phase.upper():5} pass={summary['passed_cases']}/{summary['cases']} "
             f"activation={summary['activated_cases']}/{summary['trigger_cases']} "
             f"invalid={summary['invalid_methods']} unsafe={summary['unsafe_calls']} "
-            f"forbidden={summary['forbidden_hits']} tokens="
+            f"forbidden={summary['forbidden_hits']} "
+            f"failed={summary['failed_processes']} "
+            f"policy-blocked={summary['tool_policy_blocks']} tokens="
             f"{summary['input_tokens'] + summary['output_tokens']}"
         )
     if "green" in report["phases"]:
@@ -610,7 +640,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dir", default=str(DEFAULT_WORKDIR), help="Codex working directory")
     parser.add_argument("--bsl-src", default=str(DEFAULT_BSL_SRC), help="Configuration root with CommonModules")
     parser.add_argument("--cdx", default="cdx", help="Codex launcher command (default: cdx)")
-    parser.add_argument("--model", help="Exact model id; omit to use the launcher default")
+    parser.add_argument(
+        "--model", default=DEFAULT_MODEL,
+        help=f"Exact model id (default: {DEFAULT_MODEL})",
+    )
     parser.add_argument(
         "--reasoning-effort", choices=("low", "medium", "high", "xhigh"),
         help="Optional model_reasoning_effort override",
@@ -682,6 +715,7 @@ def main() -> None:
             print(f"Workdir: {workdir}")
             print(f"BSL modules indexed: {len(method_index)}")
             print(f"Launcher: {cdx}")
+            print(f"Model: {args.model}")
             print(f"GREEN staging target: {stage_target}")
             return
 

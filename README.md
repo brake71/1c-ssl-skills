@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.
 Чтобы установить конкретный тег или коммит, передайте `--ref`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.8
+curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.9
 ```
 
 Если не хочется выполнять загруженный код через pipe, сначала сохраните и
@@ -59,7 +59,7 @@ irm https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.ps1 -Ou
 .\install.ps1 -Agent Codex
 .\install.ps1 -Agent OpenCode
 .\install.ps1 -Target C:\path\to\skills
-.\install.ps1 -Agent Codex -Ref v0.8
+.\install.ps1 -Agent Codex -Ref v0.9
 Remove-Item .\install.ps1
 ```
 
@@ -148,11 +148,20 @@ python ci/run_skill_evals.py --runs 3 --jobs 6
 
 `--jobs` задаёт предельное число одновременных запусков `cdx`; значение `6`
 сокращает длительность полного прогона, не меняя число повторов и пороги.
+Модель тестов зафиксирована как `gpt-5.6-luna`; при сравнении с другой моделью
+её точный идентификатор можно передать через `--model`.
 
 RED и GREEN выполняются в одном каталоге `src/`. В GREEN runner временно
 устанавливает только `bsp` в `src/.agents/skills/bsp`, а затем удаляет staging.
 Глобальные каталоги скилов не изменяются. Сырые JSONL-события, ответы и отчёт
 сохраняются в `.tmp/bsp-evals/`.
+
+Runner изолирует запуск флагами `--ignore-user-config`, `--ignore-rules` и
+`--sandbox read-only`. На Windows он дополнительно задаёт
+`windows.sandbox="unelevated"`: без явного backend после отключения
+пользовательского config Codex блокирует даже команды чтения. Такие отказы
+помечаются в отчёте как `tool_policy_blocked` и считаются инфраструктурными
+ошибками, даже если процесс `cdx` вернул код 0.
 
 Основные метрики: доля прошедших сценариев, неявная активация по наблюдаемому
 чтению staged `SKILL.md`/reference в JSONL-трейсе, точность методов, вызовы
