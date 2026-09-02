@@ -285,12 +285,55 @@ class StagingTests(unittest.TestCase):
                     pass
 
 
+class ExecutionStatusTests(unittest.TestCase):
+    @staticmethod
+    def _execution(**overrides):
+        execution = {
+            "returncode": 0,
+            "timed_out": False,
+            "tool_policy_blocked": False,
+            "response": "Готово",
+            "stderr_tail": "",
+            "score": {"passed": True},
+        }
+        execution.update(overrides)
+        return execution
+
+    def test_execution_status_distinguishes_quality_infrastructure_and_incomplete(self):
+        self.assertEqual(runner.execution_status(self._execution()), "completed")
+        self.assertEqual(
+            runner.execution_status(self._execution(score={"passed": False})),
+            "quality_failed",
+        )
+        self.assertEqual(
+            runner.execution_status(self._execution(timed_out=True)),
+            "infrastructure_failed",
+        )
+        self.assertEqual(
+            runner.execution_status(self._execution(response="")),
+            "incomplete",
+        )
+
+    def test_infrastructure_reason_is_classified(self):
+        examples = {
+            "quota exceeded": "quota_or_rate_limit",
+            "authentication required": "authentication",
+            "connection reset by peer": "network",
+            "model is unavailable": "model_unavailable",
+        }
+        for stderr, expected in examples.items():
+            with self.subTest(stderr=stderr):
+                execution = self._execution(returncode=1, stderr_tail=stderr)
+                self.assertEqual(runner.infrastructure_reason(execution), expected)
+
+
 class SummaryTests(unittest.TestCase):
     def test_policy_block_is_an_infrastructure_failure(self):
         cases = [{
             "should_trigger": True,
-            "majority_passed": False,
-            "majority_activated": False,
+            "complete": False,
+            "majority_passed": None,
+            "majority_activated": None,
             "runs": [{
                 "returncode": 0,
                 "tool_policy_blocked": True,
@@ -303,8 +346,40 @@ class SummaryTests(unittest.TestCase):
             }],
         }]
         summary = runner.summarize_phase(cases)
+        self.assertEqual(summary["cases"], 0)
+        self.assertEqual(summary["attempted_cases"], 1)
         self.assertEqual(summary["failed_processes"], 1)
         self.assertEqual(summary["tool_policy_blocks"], 1)
+        self.assertEqual(summary["infrastructure_failures"], 1)
+        self.assertEqual(summary["infrastructure_reasons"], {"sandbox_policy": 1})
+        self.assertEqual(summary["incomplete_runs"], 0)
+
+
+class ResumeReportTests(unittest.TestCase):
+    def test_resume_report_rejects_incompatible_model(self):
+        report = {
+            "schema_version": 2,
+            "model": "old-model",
+            "selected_cases": ["case-a"],
+            "runs": 1,
+            "phases_requested": ["red", "green"],
+        }
+        expected = {
+            "model": "new-model",
+            "selected_cases": ["case-a"],
+            "runs": 1,
+            "phases_requested": ["red", "green"],
+        }
+        with self.assertRaisesRegex(runner.EvalError, "model"):
+            runner.validate_resume_report(report, expected)
+
+    def test_atomic_report_write_replaces_destination(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.json"
+            path.write_text('{"old": true}', encoding="utf-8")
+            runner.atomic_write_json(path, {"complete": False})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"complete": False})
+            self.assertFalse(path.with_suffix(path.suffix + ".tmp").exists())
 
 
 class ParallelExecutionTests(unittest.TestCase):
@@ -330,12 +405,12 @@ class ParallelExecutionTests(unittest.TestCase):
             barrier.wait(timeout=2)
             return {"case": case.id, "run": run_number}
 
-        def on_case_complete(case_index, _matrix):
-            completed.append(case_index)
+        def on_run_complete(case_index, run_index, _matrix):
+            completed.append((case_index, run_index))
 
         matrix = runner.execute_run_matrix(
             cases, runs=2, jobs=2, execute=execute,
-            on_case_complete=on_case_complete,
+            on_run_complete=on_run_complete,
         )
 
         self.assertEqual(
@@ -345,7 +420,54 @@ class ParallelExecutionTests(unittest.TestCase):
                 [{"case": "second", "run": 1}, {"case": "second", "run": 2}],
             ],
         )
-        self.assertCountEqual(completed, [0, 1])
+        self.assertCountEqual(completed, [(0, 0), (0, 1), (1, 0), (1, 1)])
+
+    def test_resume_keeps_completed_attempts_and_retries_only_retryable_slots(self):
+        cases = [self._case("first")]
+        completed = {"status": "completed", "marker": "keep"}
+        quality_failed = {"status": "quality_failed", "marker": "keep-quality"}
+        infrastructure_failed = {"status": "infrastructure_failed"}
+        incomplete = {"status": "incomplete"}
+        initial = runner.resume_run_matrix(
+            cases,
+            runs=5,
+            stored={
+                "first": [
+                    completed,
+                    infrastructure_failed,
+                    quality_failed,
+                    incomplete,
+                ]
+            },
+        )
+        executed = []
+
+        def execute(case, run_number):
+            executed.append((case.id, run_number))
+            return {"status": "completed", "marker": "new"}
+
+        matrix = runner.execute_run_matrix(
+            cases, runs=5, jobs=1, execute=execute, initial_matrix=initial
+        )
+
+        self.assertEqual(executed, [("first", 2), ("first", 4), ("first", 5)])
+        self.assertEqual(matrix[0][0]["marker"], "keep")
+        self.assertEqual(matrix[0][1]["marker"], "new")
+        self.assertEqual(matrix[0][2]["marker"], "keep-quality")
+        self.assertEqual(matrix[0][3]["marker"], "new")
+        self.assertEqual(matrix[0][4]["marker"], "new")
+
+    def test_infrastructure_attempt_does_not_count_as_quality_result(self):
+        cases = [self._case("first")]
+        run = {
+            "status": "infrastructure_failed",
+            "score": {"passed": False},
+            "skill_activated": False,
+        }
+        records = runner.phase_case_records(cases, [[run]], expected_runs=1)
+        self.assertEqual(len(records), 1)
+        self.assertFalse(records[0]["complete"])
+        self.assertIsNone(records[0]["majority_passed"])
 
     def test_phase_records_skip_incomplete_cases(self):
         cases = [self._case("first"), self._case("second")]

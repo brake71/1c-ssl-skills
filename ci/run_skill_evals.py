@@ -11,6 +11,7 @@ skill directory and refuses to overwrite an existing staged skill.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -60,6 +61,12 @@ NEGATIVE_BLOCK_RE = re.compile(
     re.I,
 )
 NEGATIVE_CONNECTOR_RE = re.compile(r"^(?:или|либо|и|or|and)\s*[:;,.]?$", re.I)
+INFRASTRUCTURE_PATTERNS = (
+    ("quota_or_rate_limit", re.compile(r"quota|rate[ _-]?limit|too many requests", re.I)),
+    ("authentication", re.compile(r"auth(?:entication|orization)?|unauthorized|forbidden|login", re.I)),
+    ("network", re.compile(r"network|connection|dns|socket|proxy|tls|certificate", re.I)),
+    ("model_unavailable", re.compile(r"model[^\n]{0,80}(?:unavailable|not found|unsupported)|no such model", re.I)),
+)
 
 
 class EvalError(RuntimeError):
@@ -138,6 +145,20 @@ def _pattern_tuple(
     if not all(isinstance(item, str) and item for item in value):
         raise EvalError(f"Case {case_id} has invalid values in {key}")
     return tuple(value)
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def skill_sha256(skill_dir: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(item for item in skill_dir.rglob("*") if item.is_file()):
+        digest.update(path.relative_to(skill_dir).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def validate_skill(skill_dir: Path) -> str:
@@ -531,9 +552,58 @@ def run_cdx(
     }
 
 
+def infrastructure_reason(execution: dict) -> str | None:
+    """Return a stable category for failures outside skill-content quality."""
+    if execution.get("timed_out"):
+        return "timeout"
+    if execution.get("tool_policy_blocked"):
+        return "sandbox_policy"
+    stderr = str(execution.get("stderr_tail", ""))
+    if execution.get("returncode", 0) != 0 or not str(execution.get("response", "")).strip():
+        for reason, pattern in INFRASTRUCTURE_PATTERNS:
+            if pattern.search(stderr):
+                return reason
+    if execution.get("returncode", 0) != 0:
+        return "process_error"
+    return None
+
+
+def execution_status(execution: dict) -> str:
+    """Classify one attempted run without conflating quality and infrastructure."""
+    if infrastructure_reason(execution) is not None:
+        return "infrastructure_failed"
+    if not str(execution.get("response", "")).strip():
+        return "incomplete"
+    score = execution.get("score")
+    if not isinstance(score, dict):
+        return "incomplete"
+    return "completed" if score.get("passed", False) else "quality_failed"
+
+
 def majority(values: Iterable[bool]) -> bool:
     items = list(values)
     return sum(items) >= (len(items) // 2 + 1)
+
+
+def resume_run_matrix(
+    cases: list[EvalCase], runs: int, stored: dict[str, list[dict | None]] | None
+) -> list[list[dict | None]]:
+    """Restore durable outcomes; retry missing, incomplete, and infrastructure failures."""
+    stored = stored or {}
+    matrix: list[list[dict | None]] = []
+    for case in cases:
+        previous = stored.get(case.id, [])
+        case_runs: list[dict | None] = []
+        for run_index in range(runs):
+            run = previous[run_index] if run_index < len(previous) else None
+            if isinstance(run, dict):
+                status = run.get("status") or execution_status(run)
+                if status in {"completed", "quality_failed"}:
+                    case_runs.append(run)
+                    continue
+            case_runs.append(None)
+        matrix.append(case_runs)
+    return matrix
 
 
 def execute_run_matrix(
@@ -541,22 +611,31 @@ def execute_run_matrix(
     runs: int,
     jobs: int,
     execute: Callable[[EvalCase, int], dict],
-    on_case_complete: Callable[[int, list[list[dict | None]]], None] | None = None,
+    on_run_complete: Callable[[int, int, list[list[dict | None]]], None] | None = None,
+    initial_matrix: list[list[dict | None]] | None = None,
 ) -> list[list[dict]]:
-    """Execute independent case runs concurrently and preserve corpus order."""
-    matrix: list[list[dict | None]] = [[None] * runs for _ in cases]
-    max_workers = min(jobs, len(cases) * runs)
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {
-            pool.submit(execute, case, run_number): (case_index, run_number - 1)
-            for case_index, case in enumerate(cases)
-            for run_number in range(1, runs + 1)
-        }
-        for future in as_completed(futures):
-            case_index, run_index = futures[future]
-            matrix[case_index][run_index] = future.result()
-            if on_case_complete and all(matrix[case_index]):
-                on_case_complete(case_index, matrix)
+    """Execute missing case runs concurrently and preserve corpus order."""
+    matrix = initial_matrix or [[None] * runs for _ in cases]
+    if len(matrix) != len(cases) or any(len(case_runs) != runs for case_runs in matrix):
+        raise EvalError("Initial run matrix does not match selected cases and --runs")
+    pending = [
+        (case_index, case, run_number)
+        for case_index, case in enumerate(cases)
+        for run_number in range(1, runs + 1)
+        if matrix[case_index][run_number - 1] is None
+    ]
+    if pending:
+        max_workers = min(jobs, len(pending))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(execute, case, run_number): (case_index, run_number - 1)
+                for case_index, case, run_number in pending
+            }
+            for future in as_completed(futures):
+                case_index, run_index = futures[future]
+                matrix[case_index][run_index] = future.result()
+                if on_run_complete:
+                    on_run_complete(case_index, run_index, matrix)
     return [[run for run in case_runs if run is not None] for case_runs in matrix]
 
 
@@ -569,28 +648,47 @@ def phase_case_records(
         if len(raw_runs) != expected_runs or any(run is None for run in raw_runs):
             continue
         case_runs = [run for run in raw_runs if run is not None]
+        complete = all(
+            run.get("status", "completed") in {"completed", "quality_failed"}
+            for run in case_runs
+        )
         records.append({
             "id": case.id,
             "reference": case.reference,
             "should_trigger": case.should_trigger,
-            "majority_passed": majority(run["score"]["passed"] for run in case_runs),
-            "majority_activated": majority(run["skill_activated"] for run in case_runs),
+            "complete": complete,
+            "majority_passed": (
+                majority(run["score"]["passed"] for run in case_runs) if complete else None
+            ),
+            "majority_activated": (
+                majority(run["skill_activated"] for run in case_runs) if complete else None
+            ),
             "runs": case_runs,
         })
     return records
 
 
 def summarize_phase(cases: list[dict]) -> dict:
-    passed_cases = sum(case["majority_passed"] for case in cases)
-    trigger_cases = [case for case in cases if case["should_trigger"]]
+    completed_cases = [case for case in cases if case.get("complete", True)]
+    passed_cases = sum(case["majority_passed"] for case in completed_cases)
+    trigger_cases = [case for case in completed_cases if case["should_trigger"]]
     activated_cases = sum(case["majority_activated"] for case in trigger_cases)
     runs = [run for case in cases for run in case["runs"]]
     input_tokens = [run["usage"].get("input_tokens", 0) for run in runs]
     output_tokens = [run["usage"].get("output_tokens", 0) for run in runs]
+    statuses = [run.get("status") or execution_status(run) for run in runs]
+    infrastructure_reasons: dict[str, int] = {}
+    for run, status in zip(runs, statuses):
+        if status != "infrastructure_failed":
+            continue
+        reason = run.get("infrastructure_reason") or infrastructure_reason(run) or "unknown"
+        infrastructure_reasons[reason] = infrastructure_reasons.get(reason, 0) + 1
     return {
-        "cases": len(cases),
+        "cases": len(completed_cases),
+        "attempted_cases": len(cases),
+        "incomplete_cases": len(cases) - len(completed_cases),
         "passed_cases": passed_cases,
-        "pass_rate": passed_cases / len(cases) if cases else 0.0,
+        "pass_rate": passed_cases / len(completed_cases) if completed_cases else 0.0,
         "trigger_cases": len(trigger_cases),
         "activated_cases": activated_cases,
         "activation_rate": activated_cases / len(trigger_cases) if trigger_cases else 1.0,
@@ -604,9 +702,35 @@ def summarize_phase(cases: list[dict]) -> dict:
         "tool_policy_blocks": sum(
             run.get("tool_policy_blocked", False) for run in runs
         ),
+        "infrastructure_failures": statuses.count("infrastructure_failed"),
+        "infrastructure_reasons": infrastructure_reasons,
+        "incomplete_runs": statuses.count("incomplete"),
+        "quality_failures": statuses.count("quality_failed"),
         "input_tokens": sum(input_tokens),
         "output_tokens": sum(output_tokens),
     }
+
+
+def atomic_write_json(path: Path, payload: dict) -> None:
+    """Atomically replace a JSON report so interruption cannot leave a partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    temporary.replace(path)
+
+
+def validate_resume_report(report: dict, expected: dict) -> None:
+    """Reject resume requests that could mix incomparable evaluation results."""
+    if report.get("schema_version") != 2:
+        raise EvalError("--resume requires a schema_version=2 report")
+    for key, expected_value in expected.items():
+        if report.get(key) != expected_value:
+            raise EvalError(
+                f"Cannot resume: report {key}={report.get(key)!r}, "
+                f"requested {expected_value!r}"
+            )
 
 
 def print_summary(report: dict) -> None:
@@ -622,6 +746,8 @@ def print_summary(report: dict) -> None:
             f"invalid={summary['invalid_methods']} unsafe={summary['unsafe_calls']} "
             f"forbidden={summary['forbidden_hits']} "
             f"failed={summary['failed_processes']} "
+            f"infra={summary['infrastructure_failures']} "
+            f"incomplete={summary['incomplete_runs']} "
             f"policy-blocked={summary['tool_policy_blocks']} tokens="
             f"{summary['input_tokens'] + summary['output_tokens']}"
         )
@@ -656,6 +782,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--phase", choices=("red", "green", "both"), default="both")
     parser.add_argument("--timeout", type=int, default=600, help="Seconds per cdx invocation")
     parser.add_argument("--output", help="Report JSON path; artifacts are stored beside it")
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Continue --output report; retry only missing/infrastructure/incomplete runs",
+    )
     parser.add_argument("--min-pass-rate", type=float, default=0.80)
     parser.add_argument("--min-activation-rate", type=float, default=0.80)
     parser.add_argument("--dry-run", action="store_true", help="Validate setup without model calls")
@@ -677,7 +807,8 @@ def main() -> None:
             if not 0 <= value <= 1:
                 raise EvalError(f"{name} must be between 0 and 1")
 
-        cases = load_cases(Path(args.cases).resolve())
+        cases_path = Path(args.cases).resolve()
+        cases = load_cases(cases_path)
         if args.case_ids:
             requested = set(args.case_ids)
             known = {case.id for case in cases}
@@ -702,12 +833,31 @@ def main() -> None:
             )
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        if args.resume and not args.output:
+            raise EvalError("--resume requires --output <existing-report.json>")
         if args.output:
             report_path = Path(args.output).resolve()
             artifact_dir = report_path.parent / f"{report_path.stem}-artifacts"
         else:
             artifact_dir = REPO_ROOT / ".tmp" / "bsp-evals" / timestamp
             report_path = artifact_dir / "report.json"
+
+        phases = ["red", "green"] if args.phase == "both" else [args.phase]
+        report_settings = {
+            "launcher": cdx,
+            "model": args.model,
+            "reasoning_effort": args.reasoning_effort,
+            "skill": str(skill_dir),
+            "workdir": str(workdir),
+            "bsl_src": str(bsl_src) if bsl_src else None,
+            "selected_cases": [case.id for case in cases],
+            "corpus_sha256": file_sha256(cases_path),
+            "skill_sha256": skill_sha256(skill_dir),
+            "runs": args.runs,
+            "phases_requested": phases,
+            "min_pass_rate": args.min_pass_rate,
+            "min_activation_rate": args.min_activation_rate,
+        }
 
         if args.dry_run:
             print(f"PASS: {len(cases)} eval cases are valid.")
@@ -719,24 +869,27 @@ def main() -> None:
             print(f"GREEN staging target: {stage_target}")
             return
 
-        artifact_dir.mkdir(parents=True, exist_ok=False)
-        phases = ["red", "green"] if args.phase == "both" else [args.phase]
-        report = {
-            "schema_version": 1,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "launcher": cdx,
-            "model": args.model,
-            "reasoning_effort": args.reasoning_effort,
-            "skill": str(skill_dir),
-            "workdir": str(workdir),
-            "bsl_src": str(bsl_src) if bsl_src else None,
-            "selected_cases": [case.id for case in cases],
-            "runs": args.runs,
-            "jobs": args.jobs,
-            "complete": False,
-            "phases": {},
-            "report_path": str(report_path),
-        }
+        if args.resume:
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise EvalError(f"Cannot read resume report {report_path}: {exc}") from exc
+            validate_resume_report(report, report_settings)
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            report["complete"] = False
+            report["resumed_at"] = datetime.now(timezone.utc).isoformat()
+            report["jobs"] = args.jobs
+        else:
+            artifact_dir.mkdir(parents=True, exist_ok=False)
+            report = {
+                "schema_version": 2,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                **report_settings,
+                "jobs": args.jobs,
+                "complete": False,
+                "phases": {},
+                "report_path": str(report_path),
+            }
 
         for phase in phases:
             context = staged_skill(skill_dir, stage_target) if phase == "green" else _null_context()
@@ -757,30 +910,41 @@ def main() -> None:
                         skill_activated=execution["skill_activated"],
                         require_activation=phase == "green",
                     )
+                    execution["infrastructure_reason"] = infrastructure_reason(execution)
+                    execution["status"] = execution_status(execution)
                     return execution
 
                 def save_progress(
-                    _case_index: int, matrix: list[list[dict | None]]
+                    _case_index: int,
+                    _run_index: int,
+                    matrix: list[list[dict | None]],
                 ) -> None:
                     phase_cases = phase_case_records(cases, matrix, args.runs)
                     report["phases"][phase] = {
+                        "run_matrix": {
+                            case.id: matrix[index] for index, case in enumerate(cases)
+                        },
                         "cases": phase_cases,
                         "summary": summarize_phase(phase_cases),
                     }
-                    report_path.parent.mkdir(parents=True, exist_ok=True)
-                    report_path.write_text(
-                        json.dumps(report, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
+                    atomic_write_json(report_path, report)
 
+                stored_runs = report.get("phases", {}).get(phase, {}).get("run_matrix")
+                initial_matrix = resume_run_matrix(cases, args.runs, stored_runs)
                 run_matrix = execute_run_matrix(
-                    cases, args.runs, args.jobs, execute, save_progress
+                    cases, args.runs, args.jobs, execute,
+                    on_run_complete=save_progress,
+                    initial_matrix=initial_matrix,
                 )
                 phase_cases = phase_case_records(cases, run_matrix, args.runs)
             report["phases"][phase] = {
+                "run_matrix": {
+                    case.id: run_matrix[index] for index, case in enumerate(cases)
+                },
                 "cases": phase_cases,
                 "summary": summarize_phase(phase_cases),
             }
+            atomic_write_json(report_path, report)
 
         gate_reasons = []
         if "green" in report["phases"]:
@@ -797,12 +961,20 @@ def main() -> None:
             for metric in ("invalid_methods", "unsafe_calls", "forbidden_hits", "failed_processes"):
                 if green[metric]:
                     gate_reasons.append(f"{metric} must be 0, got {green[metric]}")
+        retryable_runs = [
+            run
+            for phase in phases
+            for runs_by_case in report["phases"][phase]["run_matrix"].values()
+            for run in runs_by_case
+            if run is None or run.get("status") in {"infrastructure_failed", "incomplete"}
+        ]
+        if retryable_runs:
+            gate_reasons.append(
+                f"{len(retryable_runs)} run(s) incomplete or infrastructure-failed; use --resume"
+            )
         report["gate"] = {"passed": not gate_reasons, "reasons": gate_reasons}
-        report["complete"] = True
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(
-            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        report["complete"] = not retryable_runs
+        atomic_write_json(report_path, report)
         print_summary(report)
         if not args.no_fail and not report["gate"]["passed"]:
             sys.exit(1)

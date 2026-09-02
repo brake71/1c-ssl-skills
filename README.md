@@ -144,7 +144,18 @@ python ci/run_skill_evals.py --case message-bound-to-field --runs 1
 
 # Полный релизный прогон; три повтора уменьшают влияние дрейфа модели.
 python ci/run_skill_evals.py --runs 3 --jobs 6
+
+# Возобновляемый прогон с фиксированным путём отчёта.
+python ci/run_skill_evals.py --runs 3 --jobs 6 --output .tmp/release-eval.json
+python ci/run_skill_evals.py --runs 3 --jobs 6 --output .tmp/release-eval.json --resume
 ```
+
+При `--resume` runner проверяет модель, корпус, число повторов, фазы и пороги,
+сохраняет уже завершённые качественные результаты и повторяет только
+отсутствующие, незавершённые или инфраструктурно упавшие запуски. Отчёт
+атомарно обновляется после каждого `case × phase × run`. Инфраструктурные
+причины (`quota/rate limit`, authentication, network, timeout, недоступная
+модель и sandbox policy) отделены от ошибок качества ответа.
 
 `--jobs` задаёт предельное число одновременных запусков `cdx`; значение `6`
 сокращает длительность полного прогона, не меняя число повторов и пороги.
