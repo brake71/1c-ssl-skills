@@ -235,7 +235,7 @@ API общих модулей или редко нужны прикладном�
    grep -rPl "^(Функция|Процедура)\s+<Метод>\b" src/cf/CommonModules/
    ```
 3. **Скрипт `bsp_api.py`** (даёт сигнатуру + имя региона + doc-комментарий +
-   путь): `python scripts/bsp_api.py method <Имя> [--module <Модуль>] --src src/cf`
+   путь + диапазон строк): `python scripts/bsp_api.py method <Имя> [--module <Модуль>] --src src/cf`
    — для уточнения модуля, если метод в нескольких; `python scripts/bsp_api.py
    module <Модуль> --src src/cf` — все экспортные методы модуля с регионами.
 4. **Для редких/служебных методов** — прямой греп по `src/cf/CommonModules/`

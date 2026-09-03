@@ -3,8 +3,8 @@
 """bsp_api.py — lookup methods/modules in a 1C configuration export.
 
 Three commands, all require --src <path> (root containing CommonModules/):
-  method <Имя>     — module + full signature + region name + doc-comment + path
-  module <Имя>      — all export methods of one module (any region) with signatures
+  method <Имя>     — module + signature + region + doc + path + method line range
+  module <Имя>      — export methods with signatures, regions, and line ranges
   modules           — modules with stable API (region == ПрограммныйИнтерфейс + export)
 
 Region is reported by its real #Область name (ПрограммныйИнтерфейс /
@@ -88,7 +88,11 @@ def _is_override_module(mod_name):
 
 
 def parse_export_methods(bsl_path):
-    """Parse .bsl, return list of (method_name, region_name, sig_text, doc_lines).
+    """Parse .bsl, return export methods with signatures and source line ranges.
+
+    Each item is ``(method_name, region_name, sig_text, doc_lines,
+    start_line, end_line)``. Line numbers are 1-based and include the
+    declaration and the closing ``КонецФункции``/``КонецПроцедуры`` line.
 
     Two passes:
       1. Compute region name per line with a stack; nested sub-regions inherit
@@ -133,7 +137,10 @@ def parse_export_methods(bsl_path):
             continue
         keyword = m.group(1)
         method_name = m.group(2)
-        end_keyword = "Конец" + keyword
+        end_keyword = {
+            "Функция": "КонецФункции",
+            "Процедура": "КонецПроцедуры",
+        }[keyword]
         region = region_names[i]
 
         sig_text = stripped
@@ -161,7 +168,15 @@ def parse_export_methods(bsl_path):
                 j = j2
         if is_export:
             doc_lines = _collect_doc(lines, i)
-            methods.append((method_name, region, sig_text, doc_lines))
+            end_idx = j
+            end_pattern = re.compile(rf"^{end_keyword}\s*;?\s*(?://.*)?$")
+            for body_idx in range(j + 1, n):
+                if end_pattern.match(lines[body_idx].strip()):
+                    end_idx = body_idx
+                    break
+            methods.append((method_name, region, sig_text, doc_lines,
+                            i + 1, end_idx + 1))
+            j = end_idx
         i = j + 1
     return methods
 
@@ -218,10 +233,12 @@ def _stability_warning(mod_name, region):
     return None
 
 
-def _print_method(mod_name, bsl_path, region, sig_text, doc_lines):
+def _print_method(mod_name, bsl_path, region, sig_text, doc_lines,
+                  start_line, end_line):
     print(f"Module: {mod_name}")
     print(f"Region: #Область {region}" if region else "Region: (вне отслеживаемых областей)")
     print(f"Path:   {bsl_path}")
+    print(f"Lines:  {start_line}-{end_line}")
     print("\nSignature:")
     print(sig_text)
     warn = _stability_warning(mod_name, region)
@@ -237,11 +254,13 @@ def _collect_matches(src, target):
     target = target.lower()
     matches = []
     for mod_name, bsl_path in list_common_modules(src):
-        for method_name, region, sig_text, doc_lines in parse_export_methods(bsl_path):
+        for (method_name, region, sig_text, doc_lines,
+             start_line, end_line) in parse_export_methods(bsl_path):
             if method_name.lower() == target:
                 matches.append({
                     "mod": mod_name, "bsl": bsl_path, "region": region,
                     "sig": sig_text, "doc": doc_lines,
+                    "start_line": start_line, "end_line": end_line,
                 })
     return matches
 
@@ -257,9 +276,11 @@ def cmd_method(args):
         for mod_name, bsl_path in list_common_modules(src):
             if mod_name.lower() != mod_target:
                 continue
-            for method_name, region, sig_text, doc_lines in parse_export_methods(bsl_path):
+            for (method_name, region, sig_text, doc_lines,
+                 start_line, end_line) in parse_export_methods(bsl_path):
                 if method_name.lower() == target.lower():
-                    _print_method(mod_name, bsl_path, region, sig_text, doc_lines)
+                    _print_method(mod_name, bsl_path, region, sig_text, doc_lines,
+                                  start_line, end_line)
                     return
         print(f"Method '{target}' not found in module '{args.module}' at {src}.")
         return
@@ -278,7 +299,8 @@ def cmd_method(args):
 
     if len(candidates) == 1:
         m = candidates[0]
-        _print_method(m["mod"], m["bsl"], m["region"], m["sig"], m["doc"])
+        _print_method(m["mod"], m["bsl"], m["region"], m["sig"], m["doc"],
+                      m["start_line"], m["end_line"])
         return
 
     # Several candidates. If they all share the same signature they are just
@@ -291,7 +313,8 @@ def cmd_method(args):
         chosen = min(candidates, key=lambda m: len(m["mod"]))
         others = [m["mod"] for m in candidates if m["mod"] != chosen["mod"]]
         _print_method(chosen["mod"], chosen["bsl"], chosen["region"],
-                      chosen["sig"], chosen["doc"])
+                      chosen["sig"], chosen["doc"], chosen["start_line"],
+                      chosen["end_line"])
         if others:
             print(f"\nТакже определён в (вариант контекста исполнения): {', '.join(others)}")
         return
@@ -302,7 +325,8 @@ def cmd_method(args):
     for m in candidates:
         sig_one = m["sig"].replace("\n", " ")
         region = m["region"] or "—"
-        print(f"  [{region}] {m['mod']}.{target}  ->  {sig_one}")
+        print(f"  [{region}] [lines {m['start_line']}-{m['end_line']}] "
+              f"{m['mod']}.{target}  ->  {sig_one}")
 
 
 def cmd_module(args):
@@ -320,11 +344,12 @@ def cmd_module(args):
                 print("No export methods found.")
                 return
             print(f"\nExport methods ({len(methods)}):")
-            for method_name, region, sig_text, _doc in methods:
+            for (method_name, region, sig_text, _doc,
+                 start_line, end_line) in methods:
                 tag = region or "—"
                 # Collapse multi-line signature to one line for the listing.
                 sig_one = sig_text.replace("\n", " ")
-                print(f"  [{tag}] {sig_one}")
+                print(f"  [{tag}] [lines {start_line}-{end_line}] {sig_one}")
             return
     print(f"Module '{args.name}' not found in CommonModules at {src}.")
 
@@ -334,7 +359,8 @@ def cmd_modules(args):
     stable = []
     for mod_name, bsl_path in list_common_modules(src):
         methods = parse_export_methods(bsl_path)
-        if any(region == STABLE_REGION for _name, region, _sig, _doc in methods):
+        if any(region == STABLE_REGION
+               for _name, region, _sig, _doc, _start, _end in methods):
             stable.append(mod_name)
     if stable:
         print(f"Modules with stable API (region #Область {STABLE_REGION} + export): {len(stable)}")
@@ -352,14 +378,18 @@ def main():
     parser = argparse.ArgumentParser(description="BSP module/method search")
     sub = parser.add_subparsers(dest="command")
 
-    p_method = sub.add_parser("method", parents=[parent],
-                              help="Find module + signature + region + doc for an export method")
+    p_method = sub.add_parser(
+        "method", parents=[parent],
+        help="Find module + signature + region + doc + source lines for an export method",
+    )
     p_method.add_argument("name", help="Method name (e.g. СообщитьПользователю)")
     p_method.add_argument("--module", default=None,
                           help="Pin to a specific module when a method exists in several")
 
-    p_module = sub.add_parser("module", parents=[parent],
-                              help="All export methods of a module with signatures + region")
+    p_module = sub.add_parser(
+        "module", parents=[parent],
+        help="All export methods of a module with signatures + region + source lines",
+    )
     p_module.add_argument("name", help="Module name (e.g. ОбщегоНазначения)")
 
     sub.add_parser("modules", parents=[parent],

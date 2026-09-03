@@ -195,7 +195,8 @@ def load_method_index(skill_dir: Path, bsl_src: Path | None) -> dict[str, dict[s
     index: dict[str, dict[str, MethodInfo]] = {}
     for module_path in sorted(common_modules.glob("*/Ext/Module.bsl")):
         methods: dict[str, MethodInfo] = {}
-        for method, region, signature, _doc in module.parse_export_methods(module_path):
+        for (method, region, signature, _doc,
+             _start_line, _end_line) in module.parse_export_methods(module_path):
             methods[method] = MethodInfo(region=region, signature=signature)
         index[module_path.parents[1].name] = methods
     return index

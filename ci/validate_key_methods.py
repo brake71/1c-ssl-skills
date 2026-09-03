@@ -284,7 +284,9 @@ def evaluate_coverage(
 def validate_claims(
     claims: Iterable[ApiClaim],
     src: Path,
-    parse_fn: Callable[[Path], list[tuple[str, str | None, str, list[str]]]],
+    parse_fn: Callable[
+        [Path], list[tuple[str, str | None, str, list[str], int, int]]
+    ],
 ) -> tuple[list[dict[str, str | int]], int]:
     """Compare claims with exported methods in ``src/CommonModules``."""
     issues: list[dict[str, str | int]] = []
@@ -298,7 +300,8 @@ def validate_claims(
                 module_cache[claim.module] = None
             else:
                 methods: dict[str, set[str | None]] = {}
-                for name, region, _signature, _doc in parse_fn(bsl_path):
+                for (name, region, _signature, _doc,
+                     _start_line, _end_line) in parse_fn(bsl_path):
                     methods.setdefault(name, set()).add(region)
                 module_cache[claim.module] = methods
 

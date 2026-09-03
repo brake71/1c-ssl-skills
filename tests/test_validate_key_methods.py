@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -29,9 +30,14 @@ class BspApiParserTests(unittest.TestCase):
         self.module_path = (
             FIXTURE_SRC / "CommonModules" / "ТестовыйМодуль" / "Ext" / "Module.bsl"
         )
+        parsed_methods = bsp_api.parse_export_methods(self.module_path)
         self.methods = {
             name: region
-            for name, region, _signature, _doc in bsp_api.parse_export_methods(self.module_path)
+            for name, region, _signature, _doc, _start_line, _end_line in parsed_methods
+        }
+        self.line_ranges = {
+            name: (start_line, end_line)
+            for name, _region, _signature, _doc, start_line, end_line in parsed_methods
         }
 
     def test_regions_and_non_exported_method(self):
@@ -51,6 +57,31 @@ class BspApiParserTests(unittest.TestCase):
 
     def test_signature_longer_than_thirty_lines(self):
         self.assertIn("ДлиннаяСигнатура", self.methods)
+
+    def test_method_line_range_includes_declaration_and_end_keyword(self):
+        self.assertEqual(self.line_ranges["СтабильныйМетод"], (4, 6))
+        self.assertEqual(self.line_ranges["ДлиннаяСигнатура"], (17, 50))
+
+
+class BspApiCliTests(unittest.TestCase):
+    def test_method_command_prints_method_line_range(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(API_PATH),
+                "method",
+                "СтабильныйМетод",
+                "--module",
+                "ТестовыйМодуль",
+                "--src",
+                str(FIXTURE_SRC),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertIn("Lines:  4-6", result.stdout)
 
 
 class ApiClaimsValidatorTests(unittest.TestCase):
