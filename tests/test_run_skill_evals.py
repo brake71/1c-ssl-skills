@@ -31,6 +31,43 @@ class EvalCorpusTests(unittest.TestCase):
         self.assertTrue(any(not case.should_trigger for case in cases))
         self.assertEqual(len(cases), len({case.id for case in cases}))
 
+    def test_repository_reference_matrix_matches_corpus_and_skill(self):
+        cases = runner.load_cases(REPO_ROOT / "evals" / "cases.json")
+        references, unscoped = runner.load_reference_matrix(
+            REPO_ROOT / "evals" / "reference-matrix.json"
+        )
+        matrix = runner.validate_reference_matrix(
+            cases, references, unscoped, SKILL_DIR / "references"
+        )
+        self.assertEqual(len(matrix), 24)
+        self.assertEqual(
+            matrix["longs-and-jobs.md"],
+            [
+                "long-operation-with-result",
+                "scheduled-job-module-suffix",
+                "nonexistent-service-module",
+            ],
+        )
+        self.assertEqual(unscoped, ["plain-bsl-no-bsp"])
+
+    def test_reference_matrix_rejects_missing_reference_and_unassigned_case(self):
+        cases = runner.load_cases(REPO_ROOT / "evals" / "cases.json")
+        references, unscoped = runner.load_reference_matrix(
+            REPO_ROOT / "evals" / "reference-matrix.json"
+        )
+        references.pop("admin-tools.md")
+        with self.assertRaisesRegex(runner.EvalError, "matrix is missing"):
+            runner.validate_reference_matrix(
+                cases, references, unscoped, SKILL_DIR / "references"
+            )
+
+        references["admin-tools.md"] = []
+        references["base-common.md"].remove("message-bound-to-field")
+        with self.assertRaisesRegex(runner.EvalError, "does not assign"):
+            runner.validate_reference_matrix(
+                cases, references, unscoped, SKILL_DIR / "references"
+            )
+
     def test_duplicate_case_id_is_rejected(self):
         payload = {
             "version": 1,

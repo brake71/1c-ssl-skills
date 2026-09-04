@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "references": {
+    "admin-tools.md": [],
+    "backup.md": [
+      "backup-public-boundary"
+    ],
+    "base-common.md": [
+      "message-bound-to-field"
+    ],
+    "bp-tasks.md": [],
+    "classifiers.md": [],
+    "commands-external.md": [],
+    "comms.md": [],
+    "contact-info.md": [],
+    "currencies-banks.md": [],
+    "data-exchange.md": [
+      "exchange-register-changes"
+    ],
+    "esign-mcd.md": [],
+    "external-components.md": [],
+    "files-and-versions.md": [],
+    "forms-validation.md": [
+      "lock-form-fields"
+    ],
+    "fundamentals.md": [],
+    "longs-and-jobs.md": [
+      "long-operation-with-result",
+      "scheduled-job-module-suffix",
+      "nonexistent-service-module"
+    ],
+    "multilang.md": [
+      "multilang-hook"
+    ],
+    "perf-monitoring.md": [],
+    "prefixes.md": [
+      "prefix-hook-not-call"
+    ],
+    "print-reports.md": [
+      "print-object-registration"
+    ],
+    "protection-pd.md": [],
+    "report-dedup.md": [],
+    "update.md": [],
+    "users-access.md": [
+      "set-user-access"
+    ]
+  },
+  "unscoped_cases": [
+    "plain-bsl-no-bsp"
+  ]
+}

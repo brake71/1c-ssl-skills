@@ -39,6 +39,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CASES = REPO_ROOT / "evals" / "cases.json"
+DEFAULT_REFERENCE_MATRIX = REPO_ROOT / "evals" / "reference-matrix.json"
 DEFAULT_SKILL = REPO_ROOT / "skills" / "bsp"
 DEFAULT_WORKDIR = REPO_ROOT / "src"
 DEFAULT_BSL_SRC = REPO_ROOT / "src" / "cf"
@@ -134,6 +135,72 @@ def load_cases(path: Path) -> list[EvalCase]:
     if not result:
         raise EvalError("Eval corpus is empty")
     return result
+
+
+def load_reference_matrix(path: Path) -> tuple[dict[str, list[str]], list[str]]:
+    """Load the checked-in reference -> eval case coverage manifest."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise EvalError(f"Cannot read reference matrix {path}: {exc}") from exc
+    references = payload.get("references")
+    unscoped = payload.get("unscoped_cases")
+    if payload.get("version") != 1 or not isinstance(references, dict):
+        raise EvalError("Reference matrix must contain version=1 and a references object")
+    if not isinstance(unscoped, list):
+        raise EvalError("Reference matrix must contain an unscoped_cases array")
+    for reference, case_ids in references.items():
+        if not isinstance(reference, str) or not reference.endswith(".md"):
+            raise EvalError(f"Invalid reference matrix key: {reference!r}")
+        if not isinstance(case_ids, list) or not all(
+            isinstance(case_id, str) and case_id for case_id in case_ids
+        ):
+            raise EvalError(f"Reference {reference} must map to an array of case ids")
+    if not all(isinstance(case_id, str) and case_id for case_id in unscoped):
+        raise EvalError("unscoped_cases must contain case ids")
+    return references, unscoped
+
+
+def validate_reference_matrix(
+    cases: list[EvalCase],
+    references: dict[str, list[str]],
+    unscoped_cases: list[str],
+    references_dir: Path,
+) -> dict[str, list[str]]:
+    """Require the manifest, corpus, and shipped reference files to agree exactly."""
+    if not references_dir.is_dir():
+        raise EvalError(f"References directory not found: {references_dir}")
+    shipped = {path.name for path in references_dir.glob("*.md") if path.is_file()}
+    declared = set(references)
+    if missing := sorted(shipped - declared):
+        raise EvalError(f"Reference matrix is missing: {', '.join(missing)}")
+    if unknown := sorted(declared - shipped):
+        raise EvalError(f"Reference matrix names unknown files: {', '.join(unknown)}")
+
+    cases_by_id = {case.id: case for case in cases}
+    assignments: dict[str, str | None] = {}
+    for reference, case_ids in references.items():
+        for case_id in case_ids:
+            if case_id in assignments:
+                raise EvalError(f"Eval case occurs more than once in reference matrix: {case_id}")
+            assignments[case_id] = reference
+    for case_id in unscoped_cases:
+        if case_id in assignments:
+            raise EvalError(f"Eval case occurs more than once in reference matrix: {case_id}")
+        assignments[case_id] = None
+
+    if missing := sorted(set(cases_by_id) - set(assignments)):
+        raise EvalError(f"Reference matrix does not assign eval cases: {', '.join(missing)}")
+    if unknown := sorted(set(assignments) - set(cases_by_id)):
+        raise EvalError(f"Reference matrix names unknown eval cases: {', '.join(unknown)}")
+    for case_id, assigned_reference in assignments.items():
+        corpus_reference = cases_by_id[case_id].reference
+        if corpus_reference != assigned_reference:
+            raise EvalError(
+                f"Reference matrix assigns {case_id} to {assigned_reference!r}, "
+                f"but corpus declares {corpus_reference!r}"
+            )
+    return {reference: list(case_ids) for reference, case_ids in references.items()}
 
 
 def _pattern_tuple(
@@ -762,6 +829,10 @@ def print_summary(report: dict) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RED/GREEN evaluations for the BSP skill")
     parser.add_argument("--cases", default=str(DEFAULT_CASES))
+    parser.add_argument(
+        "--reference-matrix", default=str(DEFAULT_REFERENCE_MATRIX),
+        help="Checked reference -> eval cases manifest",
+    )
     parser.add_argument("--case", action="append", dest="case_ids", help="Run one case id; repeatable")
     parser.add_argument("--skill", default=str(DEFAULT_SKILL), help="Path to the skill directory")
     parser.add_argument("--dir", default=str(DEFAULT_WORKDIR), help="Codex working directory")
@@ -810,6 +881,14 @@ def main() -> None:
 
         cases_path = Path(args.cases).resolve()
         cases = load_cases(cases_path)
+        matrix_path = Path(args.reference_matrix).resolve()
+        reference_matrix, unscoped_cases = load_reference_matrix(matrix_path)
+        validate_reference_matrix(
+            cases,
+            reference_matrix,
+            unscoped_cases,
+            Path(args.skill).resolve() / "references",
+        )
         if args.case_ids:
             requested = set(args.case_ids)
             known = {case.id for case in cases}
@@ -853,6 +932,7 @@ def main() -> None:
             "bsl_src": str(bsl_src) if bsl_src else None,
             "selected_cases": [case.id for case in cases],
             "corpus_sha256": file_sha256(cases_path),
+            "reference_matrix_sha256": file_sha256(matrix_path),
             "skill_sha256": skill_sha256(skill_dir),
             "runs": args.runs,
             "phases_requested": phases,
@@ -861,7 +941,12 @@ def main() -> None:
         }
 
         if args.dry_run:
+            covered_references = sum(bool(case_ids) for case_ids in reference_matrix.values())
             print(f"PASS: {len(cases)} eval cases are valid.")
+            print(
+                f"Reference matrix: {covered_references}/{len(reference_matrix)} "
+                "references have eval cases"
+            )
             print(f"Skill: {skill_dir} ({skill_name})")
             print(f"Workdir: {workdir}")
             print(f"BSL modules indexed: {len(method_index)}")
