@@ -1,29 +1,51 @@
 {
   "version": 1,
   "references": {
-    "admin-tools.md": [],
+    "admin-tools.md": [
+      "delete-marked-public-boundary"
+    ],
     "backup.md": [
       "backup-public-boundary"
     ],
     "base-common.md": [
       "message-bound-to-field"
     ],
-    "bp-tasks.md": [],
-    "classifiers.md": [],
-    "commands-external.md": [],
-    "comms.md": [],
-    "contact-info.md": [],
-    "currencies-banks.md": [],
+    "bp-tasks.md": [
+      "bp-redirect-public-boundary"
+    ],
+    "classifiers.md": [
+      "classifiers-update-public-boundary"
+    ],
+    "commands-external.md": [
+      "connected-command-hook-boundary"
+    ],
+    "comms.md": [
+      "sms-public-wrapper-not-hook"
+    ],
+    "contact-info.md": [
+      "contact-info-representation-public-boundary"
+    ],
+    "currencies-banks.md": [
+      "currency-rates-client-public-boundary"
+    ],
     "data-exchange.md": [
       "exchange-register-changes"
     ],
-    "esign-mcd.md": [],
-    "external-components.md": [],
-    "files-and-versions.md": [],
+    "esign-mcd.md": [
+      "mcd-check-public-boundary"
+    ],
+    "external-components.md": [
+      "external-component-server-public-boundary"
+    ],
+    "files-and-versions.md": [
+      "save-attached-file-public-boundary"
+    ],
     "forms-validation.md": [
       "lock-form-fields"
     ],
-    "fundamentals.md": [],
+    "fundamentals.md": [
+      "fundamentals-module-and-api-boundaries"
+    ],
     "longs-and-jobs.md": [
       "long-operation-with-result",
       "scheduled-job-module-suffix",
@@ -32,16 +54,24 @@
     "multilang.md": [
       "multilang-hook"
     ],
-    "perf-monitoring.md": [],
+    "perf-monitoring.md": [
+      "business-statistics-public-boundary"
+    ],
     "prefixes.md": [
       "prefix-hook-not-call"
     ],
     "print-reports.md": [
       "print-object-registration"
     ],
-    "protection-pd.md": [],
-    "report-dedup.md": [],
-    "update.md": [],
+    "protection-pd.md": [
+      "pd-destruction-date-public-boundary"
+    ],
+    "report-dedup.md": [
+      "dedup-replace-links-public-boundary"
+    ],
+    "update.md": [
+      "update-safe-write-module-name"
+    ],
     "users-access.md": [
       "set-user-access"
     ]
