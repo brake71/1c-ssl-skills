@@ -68,6 +68,31 @@ class EvalCorpusTests(unittest.TestCase):
                 cases, references, unscoped, SKILL_DIR / "references"
             )
 
+    def test_new_code_pattern_fields_are_loaded_and_regex_validated(self):
+        payload = {
+            "version": 1,
+            "cases": [{
+                **self._raw_case("code-patterns"),
+                "required_code_patterns": [r"Вызов\(\)"],
+                "required_code_block_patterns": [r"Процедура А", r"Процедура Б"],
+                "forbidden_code_patterns": [r"Запрещённый\("],
+            }],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            case = runner.load_cases(path)[0]
+            self.assertEqual(case.required_code_patterns, (r"Вызов\(\)",))
+            self.assertEqual(
+                case.required_code_block_patterns, (r"Процедура А", r"Процедура Б")
+            )
+            self.assertEqual(case.forbidden_code_patterns, (r"Запрещённый\(",))
+
+            payload["cases"][0]["required_code_patterns"] = ["["]
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(runner.EvalError, "Invalid regex"):
+                runner.load_cases(path)
+
     def test_duplicate_case_id_is_rejected(self):
         payload = {
             "version": 1,
@@ -112,6 +137,117 @@ class JsonlTests(unittest.TestCase):
         }]
         evidence = runner.skill_activation_evidence(events, "bsp")
         self.assertEqual(len(evidence), 1)
+
+    def test_reference_read_is_required_for_scoped_case_and_path_must_match_exactly(self):
+        skill_read = [{
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "Get-Content C:\\repo\\.agents\\skills\\bsp\\SKILL.md",
+            },
+        }]
+        correct_relative_reference = [{
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "Get-Content -Encoding utf8 '.agents/skills/bsp/references/prefixes.md'",
+            },
+        }]
+        correct_absolute_reference = [{
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "Get-Content C:\\repo\\.agents\\skills\\bsp\\references\\prefixes.md -Raw",
+            },
+        }]
+        wrong_reference = [{
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "Get-Content '.agents/skills/bsp/references/print-reports.md'",
+            },
+        }]
+        similarly_named_file = [{
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "Get-Content '.agents/skills/bsp/references/prefixes.md.bak'",
+            },
+        }]
+        non_read_command = [{
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "Write-Output '.agents/skills/bsp/references/prefixes.md'",
+            },
+        }]
+        incomplete_read = [{
+            "type": "item.started",
+            "item": {
+                "type": "command_execution",
+                "command": "Get-Content '.agents/skills/bsp/references/prefixes.md'",
+            },
+        }]
+        failed_read = [{
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "Get-Content '.agents/skills/bsp/references/prefixes.md'",
+                "exit_code": 1,
+            },
+        }]
+
+        self.assertEqual(len(runner.skill_activation_evidence(skill_read, "bsp")), 1)
+        self.assertEqual(
+            runner.skill_activation_evidence(skill_read, "bsp", reference="prefixes.md"),
+            [],
+        )
+        self.assertEqual(
+            len(runner.skill_activation_evidence(
+                correct_relative_reference, "bsp", reference="prefixes.md"
+            )),
+            1,
+        )
+        self.assertEqual(
+            len(runner.skill_activation_evidence(
+                correct_absolute_reference, "bsp", reference="prefixes.md"
+            )),
+            1,
+        )
+        self.assertEqual(
+            runner.skill_activation_evidence(
+                wrong_reference, "bsp", reference="prefixes.md"
+            ),
+            [],
+        )
+        self.assertEqual(
+            runner.skill_activation_evidence(
+                similarly_named_file, "bsp", reference="prefixes.md"
+            ),
+            [],
+        )
+        self.assertEqual(
+            runner.skill_activation_evidence(
+                non_read_command, "bsp", reference="prefixes.md"
+            ),
+            [],
+        )
+        self.assertEqual(
+            runner.skill_activation_evidence(
+                incomplete_read, "bsp", reference="prefixes.md"
+            ),
+            [],
+        )
+        self.assertEqual(
+            runner.skill_activation_evidence(
+                failed_read, "bsp", reference="prefixes.md"
+            ),
+            [],
+        )
+        self.assertEqual(
+            len(runner.skill_activation_evidence(correct_relative_reference, "bsp")),
+            1,
+        )
 
     def test_correct_answer_alone_is_not_activation(self):
         events = [{
@@ -278,6 +414,144 @@ class ResponseScoringTests(unittest.TestCase):
         self.assertFalse(score["passed"])
         self.assertEqual(score["unsafe_calls"][0]["call"], "ТестовыйМодуль.СлужебныйМетод")
 
+    def test_hook_implementation_survives_warning_against_direct_hook_calls(self):
+        case = next(
+            item for item in runner.load_cases(runner.DEFAULT_CASES)
+            if item.id == "prefix-hook-not-call"
+        )
+        response = (
+            "Реализуйте хук в модуле ПрефиксацияОбъектовПереопределяемый. "
+            "БСП вызывает его сама; напрямую вызывать модуль из прикладного кода не нужно.\n"
+            "```bsl\n"
+            "Процедура ПолучитьПрефиксообразующиеРеквизиты(Объекты) Экспорт\n"
+            "    СтрокаОбъекта = Объекты.Добавить();\n"
+            "    СтрокаОбъекта.Реквизит = \"ГоловнаяОрганизация\";\n"
+            "КонецПроцедуры\n```")
+        blocks = runner.executable_bsl_blocks(response)
+        self.assertEqual(len(blocks), 1)
+        self.assertTrue(
+            runner.score_response(case, response, {})["passed"]
+        )
+
+    def test_hook_implementation_survives_warning_after_code_block(self):
+        response = (
+            "```bsl\n"
+            "Процедура ПриОпределенииНастроекПечати(Настройки) Экспорт\n"
+            "    Настройки.ПриДобавленииКомандПечати = Истина;\n"
+            "КонецПроцедуры\n```\n"
+            "БСП вызывает hook сама; напрямую вызывать его не нужно."
+        )
+        self.assertEqual(len(runner.executable_bsl_blocks(response)), 1)
+
+    def test_print_registration_requires_code_for_both_registration_steps(self):
+        case = next(
+            item for item in runner.load_cases(runner.DEFAULT_CASES)
+            if item.id == "print-object-registration"
+        )
+        correct = (
+            "```bsl\n"
+            "Процедура ПриОпределенииНастроекПечати(Настройки) Экспорт\n"
+            "    Настройки.ОбъектыПечати.Добавить(Документы.МойДокумент);\n"
+            "КонецПроцедуры\n```\n"
+            "```bsl\n"
+            "Процедура ПриОпределенииНастроекПечати(Настройки) Экспорт\n"
+            "    Настройки.ПриДобавленииКомандПечати = Истина;\n"
+            "КонецПроцедуры\n```")
+        incomplete = (
+            "ОбъектыПечати зарегистрированы.\n"
+            "```bsl\n"
+            "Процедура ПриОпределенииНастроекПечати(Настройки) Экспорт\n"
+            "    Настройки.ОбъектыПечати.Добавить(Документы.МойДокумент);\n"
+            "КонецПроцедуры\n```")
+        same_block = (
+            "```bsl\n"
+            "Процедура ПриОпределенииНастроекПечати(Настройки) Экспорт\n"
+            "    Настройки.ОбъектыПечати.Добавить(Документы.МойДокумент);\n"
+            "КонецПроцедуры\n"
+            "Процедура ПриОпределенииНастроекПечати(Настройки) Экспорт\n"
+            "    Настройки.ПриДобавленииКомандПечати = Истина;\n"
+            "КонецПроцедуры\n```")
+        self.assertTrue(runner.score_response(case, correct, {})["passed"])
+        self.assertFalse(runner.score_response(case, incomplete, {})["passed"])
+        self.assertFalse(runner.score_response(case, same_block, {})["passed"])
+
+    def test_required_code_pattern_checks_call_argument_order_and_directive_context(self):
+        case = runner.EvalCase(
+            id="ordered-context", task="test", reference=None, should_trigger=True,
+            requires_bsl=True, required_patterns=(r"Готово",), forbidden_patterns=(),
+            activation_patterns=(),
+            required_code_patterns=(
+                r"(?s)&НаСервере\s*\nПроцедура\s+Проверить\s*\(\s*Контрагент\s*,\s*Отказ\s*\)",
+            ),
+        )
+        proper = (
+            "Готово\n```bsl\n&НаСервере\n"
+            "Процедура Проверить(Контрагент, Отказ)\nКонецПроцедуры\n```")
+        wrong_order = proper.replace("Контрагент, Отказ", "Отказ, Контрагент")
+        wrong_context = proper.replace("&НаСервере", "&НаКлиенте")
+        self.assertTrue(runner.score_response(case, proper, {})["passed"])
+        self.assertFalse(runner.score_response(case, wrong_order, {})["passed"])
+        self.assertFalse(runner.score_response(case, wrong_context, {})["passed"])
+
+    def test_scoped_green_requires_expected_reference_read(self):
+        case = runner.EvalCase(
+            id="scoped", task="test", reference="prefixes.md", should_trigger=True,
+            requires_bsl=False, required_patterns=(r"Ответ",), forbidden_patterns=(),
+            activation_patterns=(),
+        )
+        response = "Ответ по reference"
+        unopened_reference = runner.score_response(
+            case, response, {}, skill_activated=True, require_activation=True,
+            require_reference=True, reference_read=False,
+        )
+        opened_reference = runner.score_response(
+            case, response, {}, skill_activated=True, require_activation=True,
+            require_reference=True, reference_read=True,
+        )
+        self.assertFalse(unopened_reference["passed"])
+        self.assertFalse(unopened_reference["reference_ok"])
+        self.assertTrue(opened_reference["passed"])
+        self.assertTrue(opened_reference["reference_ok"])
+
+    def test_unscoped_and_negative_cases_do_not_require_reference_read(self):
+        case = runner.EvalCase(
+            id="unscoped", task="test", reference=None, should_trigger=True,
+            requires_bsl=False, required_patterns=(r"Ответ",), forbidden_patterns=(),
+            activation_patterns=(),
+        )
+        score = runner.score_response(
+            case, "Ответ", {}, skill_activated=True, require_activation=True,
+        )
+        self.assertTrue(score["passed"])
+        self.assertTrue(score["reference_ok"])
+
+    def test_required_code_pattern_does_not_match_prose_or_negative_fence(self):
+        case = runner.EvalCase(
+            id="code-only", task="test", reference=None, should_trigger=True,
+            requires_bsl=False, required_patterns=(r"Ответ",), forbidden_patterns=(),
+            activation_patterns=(), required_code_patterns=(r"ТестовыйМодуль\.Вызов\s*\(\)",),
+        )
+        prose = "Ответ: ТестовыйМодуль.Вызов()"
+        negative = "Ответ\nТак делать нельзя:\n```bsl\nТестовыйМодуль.Вызов();\n```"
+        self.assertFalse(runner.score_response(case, prose, {})["passed"])
+        self.assertFalse(runner.score_response(case, negative, {})["passed"])
+
+    def test_forbidden_direct_hook_call_allows_hook_implementation(self):
+        case = runner.EvalCase(
+            id="hook-boundary", task="test", reference=None, should_trigger=True,
+            requires_bsl=True, required_patterns=(r"Готово",), forbidden_patterns=(),
+            activation_patterns=(),
+            forbidden_code_patterns=(
+                r"ПрефиксацияОбъектовПереопределяемый\.ПолучитьПрефиксообразующиеРеквизиты\s*\(",
+            ),
+        )
+        direct_call = "Готово\n```bsl\nПрефиксацияОбъектовПереопределяемый.ПолучитьПрефиксообразующиеРеквизиты();\n```"
+        implementation = (
+            "Готово\n```bsl\nПроцедура ПолучитьПрефиксообразующиеРеквизиты(Реквизиты)\n"
+            "КонецПроцедуры\n```")
+        self.assertFalse(runner.score_response(case, direct_call, {})["passed"])
+        self.assertTrue(runner.score_response(case, implementation, {})["passed"])
+
     def test_negative_case_must_not_show_activation_markers(self):
         case = runner.EvalCase(
             id="negative",
@@ -365,6 +639,62 @@ class ExecutionStatusTests(unittest.TestCase):
 
 
 class SummaryTests(unittest.TestCase):
+    def test_green_gate_requires_all_scoped_references_to_be_read(self):
+        summary = {
+            "pass_rate": 1.0,
+            "activation_rate": 1.0,
+            "reference_cases": 2,
+            "reference_read_rate": 0.5,
+            "invalid_methods": 0,
+            "unsafe_calls": 0,
+            "forbidden_hits": 0,
+            "failed_processes": 0,
+        }
+        reasons = runner.green_gate_reasons(summary, 0.8, 0.8)
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("reference_read_rate", reasons[0])
+
+    def test_reference_read_rate_is_reported_for_scoped_positive_cases(self):
+        cases = [{
+            "id": "scoped",
+            "reference": "prefixes.md",
+            "should_trigger": True,
+            "complete": True,
+            "majority_passed": False,
+            "majority_activated": True,
+            "majority_reference_read": False,
+            "runs": [{
+                "returncode": 0,
+                "usage": {},
+                "score": {
+                    "invalid_methods": [],
+                    "unsafe_calls": [],
+                    "forbidden_hits": [],
+                },
+            }],
+        }, {
+            "id": "unscoped",
+            "reference": None,
+            "should_trigger": True,
+            "complete": True,
+            "majority_passed": True,
+            "majority_activated": True,
+            "majority_reference_read": None,
+            "runs": [{
+                "returncode": 0,
+                "usage": {},
+                "score": {
+                    "invalid_methods": [],
+                    "unsafe_calls": [],
+                    "forbidden_hits": [],
+                },
+            }],
+        }]
+        summary = runner.summarize_phase(cases)
+        self.assertEqual(summary["reference_cases"], 1)
+        self.assertEqual(summary["reference_read_cases"], 0)
+        self.assertEqual(summary["reference_read_rate"], 0.0)
+
     def test_policy_block_is_an_infrastructure_failure(self):
         cases = [{
             "should_trigger": True,
@@ -393,9 +723,14 @@ class SummaryTests(unittest.TestCase):
 
 
 class ResumeReportTests(unittest.TestCase):
+    def test_resume_report_rejects_old_activation_semantics(self):
+        report = {"schema_version": 2}
+        with self.assertRaisesRegex(runner.EvalError, "schema_version=3"):
+            runner.validate_resume_report(report, {})
+
     def test_resume_report_rejects_incompatible_model(self):
         report = {
-            "schema_version": 2,
+            "schema_version": 3,
             "model": "old-model",
             "selected_cases": ["case-a"],
             "runs": 1,

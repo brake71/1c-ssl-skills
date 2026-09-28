@@ -38,8 +38,8 @@ for _stream in (sys.stdout, sys.stderr):
 
 
 DEFAULT_MIN_CLAIMS = 600
-DEFAULT_MIN_FILES = 23
-DEFAULT_MIN_COVERAGE = 95.0
+DEFAULT_MIN_FILES = 24
+DEFAULT_MIN_COVERAGE = 100.0
 
 STABLE_REGION_NAME = "ПрограммныйИнтерфейс"
 TRACKED_REGIONS = (
@@ -129,10 +129,18 @@ class ClaimCollection:
     files_with_claims: frozenset[Path]
 
     @property
+    def eligible_unique(self) -> int:
+        return self.raw_unique - self.ignored_unique
+
+    @property
+    def excluded_unique(self) -> int:
+        return self.ignored_unique
+
+    @property
     def coverage_percent(self) -> float:
-        if self.raw_unique == 0:
+        if self.eligible_unique == 0:
             return 0.0
-        return 100.0 * len(self.claims) / self.raw_unique
+        return 100.0 * len(self.claims) / self.eligible_unique
 
 
 def _load_parser(skills_dir: Path):
@@ -275,7 +283,7 @@ def evaluate_coverage(
         )
     if collection.coverage_percent < min_coverage:
         issues.append(
-            f"classified coverage {collection.coverage_percent:.1f}% "
+            f"eligible-claim coverage {collection.coverage_percent:.1f}% "
             f"< required {min_coverage:.1f}%"
         )
     return issues
@@ -375,10 +383,12 @@ def _print_coverage(collection: ClaimCollection) -> None:
     print("--- Coverage ---")
     print(f"Inline occurrences:      {collection.occurrences}")
     print(f"Unique API-like tokens:  {collection.raw_unique}")
+    print(f"Eligible claims:         {collection.eligible_unique}")
+    print(f"Excluded claims:         {collection.excluded_unique}")
     print(f"Unique checked claims:   {len(collection.claims)}")
     print(f"Ignored namespaces:      {collection.ignored_unique}")
     print(f"Reference files covered: {len(collection.files_with_claims)}")
-    print(f"Classified coverage:     {collection.coverage_percent:.1f}%")
+    print(f"Eligible coverage:       {collection.coverage_percent:.1f}%")
 
 
 def main() -> None:
@@ -411,7 +421,7 @@ def main() -> None:
         "--min-coverage",
         type=_coverage_percent,
         default=DEFAULT_MIN_COVERAGE,
-        help="Required classified percentage, 95 <= value <= 100 (default: 95)",
+        help="Required eligible-claim percentage (default: 100)",
     )
     parser.add_argument(
         "--strict",

@@ -143,14 +143,36 @@ class ApiClaimsValidatorTests(unittest.TestCase):
             collection,
             min_claims=7,
             min_files=1,
-            min_coverage=95,
+            min_coverage=100,
         )
         self.assertEqual(len(issues), 1)
         self.assertIn("unique API claims", issues[0])
         with self.assertRaises(Exception):
             validator._integer_at_least(validator.DEFAULT_MIN_CLAIMS)("599")
         with self.assertRaises(Exception):
-            validator._coverage_percent("94.9")
+            validator._coverage_percent("99.9")
+
+    def test_ignored_namespaces_do_not_reduce_coverage(self):
+        collection = self._collection(
+            "`ТестовыйМодуль.СтабильныйМетод()` и "
+            "`ФоновыеЗадания.Выполнить()` и "
+            "`Справочник.Ссылка()` и `Модуль.Найти()`\n"
+        )
+        self.assertEqual(collection.eligible_unique, 1)
+        self.assertEqual(collection.excluded_unique, 3)
+        self.assertEqual(collection.coverage_percent, 100.0)
+
+    def test_default_coverage_is_exactly_100_percent(self):
+        self.assertEqual(validator.DEFAULT_MIN_COVERAGE, 100.0)
+        with self.assertRaises(Exception):
+            validator._coverage_percent("99.99")
+
+    def test_repository_corpus_has_full_coverage_across_24_references(self):
+        references = sorted((REPO_ROOT / "skills" / "bsp" / "references").glob("*.md"))
+        collection = validator.collect_claims(references)
+        self.assertEqual(collection.coverage_percent, 100.0)
+        self.assertEqual(len(collection.files_with_claims), 24)
+        self.assertEqual(validator.DEFAULT_MIN_FILES, 24)
 
     def _collection(self, text):
         with tempfile.TemporaryDirectory() as tmp:

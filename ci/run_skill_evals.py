@@ -53,6 +53,11 @@ CALL_RE = re.compile(
     r"(?<![\w.])(?P<module>[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё0-9_]*)\s*\.\s*"
     r"(?P<method>[A-Za-zА-Яа-яЁё_][A-Za-zА-Яа-яЁё0-9_]*)\s*\("
 )
+READ_COMMAND_RE = re.compile(
+    r"(?:^|-command\s+[\"']?|[;&|]\s*|[\r\n]\s*)"
+    r"(?:get-content|gc|cat|type|more|head|tail|sed|awk|rg|grep|select-string)\b",
+    re.I,
+)
 BSL_FENCE_RE = re.compile(r"```(?:bsl|1c)?\s*\n(?P<code>.*?)```", re.I | re.S)
 NEGATIVE_BLOCK_RE = re.compile(
     r"(?:не\s+(?:следует|вызыва|существ|нужно|запуска|команд|долж|явля|подход)|"
@@ -84,6 +89,9 @@ class EvalCase:
     required_patterns: tuple[str, ...]
     forbidden_patterns: tuple[str, ...]
     activation_patterns: tuple[str, ...]
+    required_code_patterns: tuple[str, ...] = ()
+    required_code_block_patterns: tuple[str, ...] = ()
+    forbidden_code_patterns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -114,7 +122,19 @@ def load_cases(path: Path) -> list[EvalCase]:
         required = _pattern_tuple(raw, "required_patterns", case_id)
         forbidden = _pattern_tuple(raw, "forbidden_patterns", case_id, required=False)
         activation = _pattern_tuple(raw, "activation_patterns", case_id, required=False)
-        for pattern in required + forbidden + activation:
+        required_code = _pattern_tuple(
+            raw, "required_code_patterns", case_id, required=False
+        )
+        required_code_blocks = _pattern_tuple(
+            raw, "required_code_block_patterns", case_id, required=False
+        )
+        forbidden_code = _pattern_tuple(
+            raw, "forbidden_code_patterns", case_id, required=False
+        )
+        for pattern in (
+            required + forbidden + activation + required_code + required_code_blocks
+            + forbidden_code
+        ):
             try:
                 re.compile(pattern, re.I | re.S)
             except re.error as exc:
@@ -131,6 +151,9 @@ def load_cases(path: Path) -> list[EvalCase]:
             required_patterns=required,
             forbidden_patterns=forbidden,
             activation_patterns=activation,
+            required_code_patterns=required_code,
+            required_code_block_patterns=required_code_blocks,
+            forbidden_code_patterns=forbidden_code,
         ))
     if not result:
         raise EvalError("Eval corpus is empty")
@@ -310,23 +333,41 @@ def usage_from_events(events: Iterable[dict]) -> dict[str, int]:
     return usage
 
 
-def skill_activation_evidence(events: Iterable[dict], skill_name: str) -> list[str]:
-    """Return observable commands that read the staged project skill."""
-    marker = f"/.agents/skills/{skill_name.lower()}/"
+def skill_activation_evidence(
+    events: Iterable[dict], skill_name: str, reference: str | None = None
+) -> list[str]:
+    """Return observable reads of the staged skill or one exact reference."""
+    skill_root = f".agents/skills/{skill_name.lower()}/"
+    if reference is not None:
+        expected_path = re.escape(f"{skill_root}references/{reference.lower()}")
+        path_pattern = re.compile(
+            rf"(?<![a-z0-9_.-]){expected_path}(?![a-z0-9_.-])"
+        )
+    else:
+        skill_path = re.escape(skill_root)
+        path_pattern = re.compile(
+            rf"(?<![a-z0-9_.-]){skill_path}"
+            rf"(?:skill\.md|references/[a-z0-9_-]+\.md)(?![a-z0-9_.-])"
+        )
+
     evidence = []
     for event in events:
-        if event.get("type") not in {"item.started", "item.completed"}:
+        if event.get("type") != "item.completed":
             continue
         item = event.get("item") or {}
         if item.get("type") != "command_execution":
             continue
+        exit_code = item.get("exit_code")
+        if exit_code is not None and exit_code != 0:
+            continue
         command = str(item.get("command", ""))
         normalized = re.sub(r"/+", "/", command.replace("\\", "/").lower())
-        if marker in normalized and (
-            "skill.md" in normalized or f"{marker}references/" in normalized
+        if (
+            READ_COMMAND_RE.search(normalized)
+            and path_pattern.search(normalized)
+            and command not in evidence
         ):
-            if command not in evidence:
-                evidence.append(command)
+            evidence.append(command)
     return evidence
 
 
@@ -352,11 +393,39 @@ def executable_bsl_blocks(response: str) -> list[str]:
         immediate_suffix = re.split(r"\n\s*\n", suffix.lstrip())[0]
         code = match.group("code")
         first_lines = "\n".join(code.splitlines()[:3])
-        negative.append(bool(
+        is_procedure_implementation = bool(re.search(
+            r"(?m)^\s*(?:Процедура|Функция)\s+\w+",
+            re.sub(r"(?m)^\s*//[^\n]*(?:\n|$)", "", code).lstrip(),
+            re.I,
+        ))
+        negative_context = bool(
             NEGATIVE_BLOCK_RE.search(immediate_prefix)
             or NEGATIVE_BLOCK_RE.search(immediate_suffix)
             or NEGATIVE_BLOCK_RE.search(first_lines)
+        )
+        # Saying that a hook must not be called can immediately precede the
+        # correct procedure that implements it. A declaration is not itself
+        # the prohibited call; explicit bad-example labels still win.
+        surrounding_context = f"{immediate_prefix}\n{immediate_suffix}"
+        direct_call_warning = bool(re.search(
+            r"не\s+(?:следует|нужно|надо)\s+вызывать|не\s+вызывайте|"
+            r"вызывать[\s\S]{0,100}не\s+нужно",
+            surrounding_context,
+            re.I,
         ))
+        explicit_bad_example = bool(re.search(
+            r"ложн|ошибоч|неправиль|неверн|антипаттерн|нельзя\s+так",
+            surrounding_context,
+            re.I,
+        ))
+        negative.append(
+            negative_context
+            and not (
+                is_procedure_implementation
+                and direct_call_warning
+                and not explicit_bad_example
+            )
+        )
 
     # Propagate negative context across adjacent alternatives such as
     # ``bad_call_one(...)`` / "или" / ``bad_call_two(...)``.
@@ -394,6 +463,8 @@ def score_response(
     *,
     skill_activated: bool = False,
     require_activation: bool = False,
+    reference_read: bool = False,
+    require_reference: bool = False,
 ) -> dict:
     flags = re.I | re.S
     normalized_response = normalize_member_access(response)
@@ -404,8 +475,28 @@ def score_response(
     blocks = bsl_blocks(response)
     executable_blocks = executable_bsl_blocks(response)
     bsl_text = normalize_member_access("\n".join(executable_blocks))
+    required_code_hits = [
+        bool(re.search(pattern, bsl_text, flags))
+        for pattern in case.required_code_patterns
+    ]
+    # Each block-pattern must be demonstrated in a distinct executable fence.
+    # Greedy matching is sufficient because eval patterns describe disjoint steps.
+    unmatched_blocks = set(range(len(executable_blocks)))
+    required_code_block_hits = []
+    for pattern in case.required_code_block_patterns:
+        matching_block = next(
+            (
+                index for index in sorted(unmatched_blocks)
+                if re.search(pattern, executable_blocks[index], flags)
+            ),
+            None,
+        )
+        required_code_block_hits.append(matching_block is not None)
+        if matching_block is not None:
+            unmatched_blocks.remove(matching_block)
     forbidden_hits = [
-        pattern for pattern in case.forbidden_patterns if re.search(pattern, bsl_text, flags)
+        pattern for pattern in case.forbidden_patterns + case.forbidden_code_patterns
+        if re.search(pattern, bsl_text, flags)
     ]
     grounding_patterns = case.activation_patterns or case.required_patterns
     grounding_hits = sum(
@@ -432,8 +523,13 @@ def score_response(
             if module_name.endswith("Переопределяемый") or info.region in SERVICE_REGIONS:
                 unsafe_calls.append({"call": call, "region": info.region})
 
-    expected_ok = all(required_hits)
+    expected_ok = (
+        all(required_hits)
+        and all(required_code_hits)
+        and all(required_code_block_hits)
+    )
     activation_ok = skill_activated if case.should_trigger else not skill_activated
+    reference_ok = reference_read if require_reference else True
     bsl_ok = bool(blocks) if case.requires_bsl else True
     quality_passed = (
         bool(response.strip())
@@ -443,7 +539,11 @@ def score_response(
         and not invalid_methods
         and not unsafe_calls
     )
-    passed = quality_passed and (activation_ok if require_activation else True)
+    passed = (
+        quality_passed
+        and (activation_ok if require_activation else True)
+        and reference_ok
+    )
     known_calls = len(calls)
     method_accuracy = (
         (known_calls - len(invalid_methods)) / known_calls if known_calls else None
@@ -453,12 +553,34 @@ def score_response(
         "quality_passed": quality_passed,
         "activated": skill_activated,
         "activation_ok": activation_ok,
+        "reference_read": reference_read,
+        "reference_ok": reference_ok,
+        "missing_reference": require_reference and not reference_read,
         "response_grounded": response_grounded,
-        "expected_hits": sum(required_hits),
-        "expected_total": len(required_hits),
-        "expected_score": sum(required_hits) / len(required_hits),
+        "expected_hits": (
+            sum(required_hits) + sum(required_code_hits) + sum(required_code_block_hits)
+        ),
+        "expected_total": (
+            len(required_hits) + len(required_code_hits) + len(required_code_block_hits)
+        ),
+        "expected_score": (
+            (sum(required_hits) + sum(required_code_hits) + sum(required_code_block_hits))
+            / (len(required_hits) + len(required_code_hits) + len(required_code_block_hits))
+        ),
         "missing_patterns": [
             pattern for pattern, hit in zip(case.required_patterns, required_hits) if not hit
+        ] + [
+            pattern for pattern, hit in zip(case.required_code_patterns, required_code_hits)
+            if not hit
+        ],
+        "missing_code_patterns": [
+            pattern for pattern, hit in zip(case.required_code_patterns, required_code_hits)
+            if not hit
+        ],
+        "missing_code_block_patterns": [
+            pattern for pattern, hit in zip(
+                case.required_code_block_patterns, required_code_block_hits
+            ) if not hit
         ],
         "forbidden_hits": forbidden_hits,
         "has_bsl": bool(blocks),
@@ -603,6 +725,11 @@ def run_cdx(
     events, noise = extract_jsonl(stdout)
     response = final_message(events)
     activation_evidence = skill_activation_evidence(events, skill_name)
+    reference_evidence = (
+        skill_activation_evidence(events, skill_name, case.reference)
+        if case.should_trigger and case.reference
+        else []
+    )
     tool_policy_blocked = "blocked by policy" in stderr
     (artifact_dir / f"{prefix}.response.md").write_text(response, encoding="utf-8")
     return {
@@ -614,6 +741,8 @@ def run_cdx(
         "response": response,
         "skill_activated": bool(activation_evidence),
         "activation_evidence": activation_evidence,
+        "expected_reference_read": bool(reference_evidence),
+        "reference_evidence": reference_evidence,
         "json_events": len(events),
         "stdout_noise": noise,
         "stderr_tail": stderr[-4000:],
@@ -731,6 +860,10 @@ def phase_case_records(
             "majority_activated": (
                 majority(run["skill_activated"] for run in case_runs) if complete else None
             ),
+            "majority_reference_read": (
+                majority(run.get("expected_reference_read", False) for run in case_runs)
+                if complete and case.should_trigger and case.reference else None
+            ),
             "runs": case_runs,
         })
     return records
@@ -741,6 +874,10 @@ def summarize_phase(cases: list[dict]) -> dict:
     passed_cases = sum(case["majority_passed"] for case in completed_cases)
     trigger_cases = [case for case in completed_cases if case["should_trigger"]]
     activated_cases = sum(case["majority_activated"] for case in trigger_cases)
+    reference_cases = [case for case in trigger_cases if case.get("reference")]
+    reference_read_cases = sum(
+        bool(case.get("majority_reference_read")) for case in reference_cases
+    )
     runs = [run for case in cases for run in case["runs"]]
     input_tokens = [run["usage"].get("input_tokens", 0) for run in runs]
     output_tokens = [run["usage"].get("output_tokens", 0) for run in runs]
@@ -760,6 +897,11 @@ def summarize_phase(cases: list[dict]) -> dict:
         "trigger_cases": len(trigger_cases),
         "activated_cases": activated_cases,
         "activation_rate": activated_cases / len(trigger_cases) if trigger_cases else 1.0,
+        "reference_cases": len(reference_cases),
+        "reference_read_cases": reference_read_cases,
+        "reference_read_rate": (
+            reference_read_cases / len(reference_cases) if reference_cases else 1.0
+        ),
         "invalid_methods": sum(len(run["score"]["invalid_methods"]) for run in runs),
         "unsafe_calls": sum(len(run["score"]["unsafe_calls"]) for run in runs),
         "forbidden_hits": sum(len(run["score"]["forbidden_hits"]) for run in runs),
@@ -791,14 +933,39 @@ def atomic_write_json(path: Path, payload: dict) -> None:
 
 def validate_resume_report(report: dict, expected: dict) -> None:
     """Reject resume requests that could mix incomparable evaluation results."""
-    if report.get("schema_version") != 2:
-        raise EvalError("--resume requires a schema_version=2 report")
+    if report.get("schema_version") != 3:
+        raise EvalError("--resume requires a schema_version=3 report")
     for key, expected_value in expected.items():
         if report.get(key) != expected_value:
             raise EvalError(
                 f"Cannot resume: report {key}={report.get(key)!r}, "
                 f"requested {expected_value!r}"
             )
+
+
+def green_gate_reasons(
+    summary: dict, min_pass_rate: float, min_activation_rate: float
+) -> list[str]:
+    """Apply GREEN quality gates, including exact reference-read coverage."""
+    reasons = []
+    if summary["pass_rate"] < min_pass_rate:
+        reasons.append(
+            f"pass_rate {summary['pass_rate']:.1%} < {min_pass_rate:.1%}"
+        )
+    if summary["activation_rate"] < min_activation_rate:
+        reasons.append(
+            f"activation_rate {summary['activation_rate']:.1%} < "
+            f"{min_activation_rate:.1%}"
+        )
+    if summary["reference_cases"] and summary["reference_read_rate"] < 1.0:
+        reasons.append(
+            "reference_read_rate must be 100%, got "
+            f"{summary['reference_read_rate']:.1%}"
+        )
+    for metric in ("invalid_methods", "unsafe_calls", "forbidden_hits", "failed_processes"):
+        if summary[metric]:
+            reasons.append(f"{metric} must be 0, got {summary[metric]}")
+    return reasons
 
 
 def print_summary(report: dict) -> None:
@@ -811,6 +978,7 @@ def print_summary(report: dict) -> None:
         print(
             f"{phase.upper():5} pass={summary['passed_cases']}/{summary['cases']} "
             f"activation={summary['activated_cases']}/{summary['trigger_cases']} "
+            f"reference-read={summary['reference_read_cases']}/{summary['reference_cases']} "
             f"invalid={summary['invalid_methods']} unsafe={summary['unsafe_calls']} "
             f"forbidden={summary['forbidden_hits']} "
             f"failed={summary['failed_processes']} "
@@ -968,7 +1136,7 @@ def main() -> None:
         else:
             artifact_dir.mkdir(parents=True, exist_ok=False)
             report = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 **report_settings,
                 "jobs": args.jobs,
@@ -995,6 +1163,10 @@ def main() -> None:
                         method_index,
                         skill_activated=execution["skill_activated"],
                         require_activation=phase == "green",
+                        reference_read=execution["expected_reference_read"],
+                        require_reference=(
+                            phase == "green" and case.should_trigger and bool(case.reference)
+                        ),
                     )
                     execution["infrastructure_reason"] = infrastructure_reason(execution)
                     execution["status"] = execution_status(execution)
@@ -1035,18 +1207,9 @@ def main() -> None:
         gate_reasons = []
         if "green" in report["phases"]:
             green = report["phases"]["green"]["summary"]
-            if green["pass_rate"] < args.min_pass_rate:
-                gate_reasons.append(
-                    f"pass_rate {green['pass_rate']:.1%} < {args.min_pass_rate:.1%}"
-                )
-            if green["activation_rate"] < args.min_activation_rate:
-                gate_reasons.append(
-                    f"activation_rate {green['activation_rate']:.1%} < "
-                    f"{args.min_activation_rate:.1%}"
-                )
-            for metric in ("invalid_methods", "unsafe_calls", "forbidden_hits", "failed_processes"):
-                if green[metric]:
-                    gate_reasons.append(f"{metric} must be 0, got {green[metric]}")
+            gate_reasons.extend(green_gate_reasons(
+                green, args.min_pass_rate, args.min_activation_rate
+            ))
         retryable_runs = [
             run
             for phase in phases
