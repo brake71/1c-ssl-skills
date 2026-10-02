@@ -11,12 +11,15 @@ skill directory and refuses to overwrite an existing staged skill.
 from __future__ import annotations
 
 import argparse
+import ast
+import fnmatch
 import hashlib
 import importlib.util
 import json
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import time
@@ -44,6 +47,14 @@ DEFAULT_SKILL = REPO_ROOT / "skills" / "bsp"
 DEFAULT_WORKDIR = REPO_ROOT / "src"
 DEFAULT_BSL_SRC = REPO_ROOT / "src" / "cf"
 DEFAULT_MODEL = "gpt-5.6-luna"
+REPORT_SCHEMA_VERSION = 4
+SKILL_CACHE_PATTERNS = ("__pycache__", "*.pyc", "*.pyo")
+WINDOWS_READING_INSTRUCTIONS = (
+    "Text files are UTF-8. On Windows, read them using rg -n . -- PATH "
+    "(filter numbered lines for a range) or Python with encoding='utf-8'. "
+    "Use these UTF-8 native readers instead of PowerShell Get-Content: its "
+    "OEM-encoded stdout is decoded as UTF-8 by the tool and corrupts Cyrillic."
+)
 SERVICE_REGIONS = frozenset({
     "СлужебныйПрограммныйИнтерфейс",
     "СлужебныеПроцедурыИФункции",
@@ -55,7 +66,8 @@ CALL_RE = re.compile(
 )
 READ_COMMAND_RE = re.compile(
     r"(?:^|-command\s+[\"']?|[;&|]\s*|[\r\n]\s*)"
-    r"(?:get-content|gc|cat|type|more|head|tail|sed|awk|rg|grep|select-string)\b",
+    r"(?P<reader>get-content|gc|cat|type|more|head|tail|sed|awk|rg|grep|select-string|"
+    r"python(?:3(?:\.\d+)?)?(?:\.exe)?|py(?:\.exe)?)\b",
     re.I,
 )
 BSL_FENCE_RE = re.compile(r"```(?:bsl|1c)?\s*\n(?P<code>.*?)```", re.I | re.S)
@@ -243,7 +255,14 @@ def file_sha256(path: Path) -> str:
 
 def skill_sha256(skill_dir: Path) -> str:
     digest = hashlib.sha256()
-    for path in sorted(item for item in skill_dir.rglob("*") if item.is_file()):
+    for path in sorted(
+        item for item in skill_dir.rglob("*")
+        if item.is_file() and not any(
+            fnmatch.fnmatchcase(part, pattern)
+            for part in item.relative_to(skill_dir).parts
+            for pattern in SKILL_CACHE_PATTERNS
+        )
+    ):
         digest.update(path.relative_to(skill_dir).as_posix().encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes())
@@ -333,6 +352,100 @@ def usage_from_events(events: Iterable[dict]) -> dict[str, int]:
     return usage
 
 
+def read_command_segment(text: str, start: int) -> str:
+    """Take one reader's arguments without following another shell command."""
+    quote = None
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if escaped:
+            escaped = False
+            continue
+        if quote == '"' and char == "\\":
+            escaped = True
+            continue
+        if char in "\"'":
+            if quote == char:
+                quote = None
+            elif quote is None:
+                quote = char
+        elif quote is None and char in ";&|\r\n":
+            return text[start:index]
+    return text[start:]
+
+
+def search_reader_targets(arguments: list[str]) -> list[str]:
+    """Identify file operands, excluding rg/grep patterns and option values."""
+    non_content = {"--files", "--files-with-matches", "--files-without-match",
+                   "--count", "--count-matches", "--quiet"}
+    pattern_options = {"-e", "--regexp", "-f", "--file"}
+    value_options = pattern_options | {
+        "-g", "--glob", "--iglob", "-t", "--type", "-T", "--type-not",
+        "-A", "-B", "-C", "--after-context", "--before-context", "--context",
+        "-m", "--max-count", "-r", "--replace", "--encoding", "--color",
+        "--max-columns", "--max-depth", "--max-filesize", "--threads", "-j",
+        "--dfa-size-limit", "--regex-size-limit", "--sort", "--sortr",
+        "--path-separator", "--type-add", "--type-clear", "--engine",
+    }
+    operands = []
+    explicit_pattern = False
+    options = True
+    index = 0
+    while index < len(arguments):
+        word = arguments[index]
+        index += 1
+        if options and word == "--":
+            options = False
+        elif options and word.startswith("-"):
+            option, equals, _value = word.partition("=")
+            if option in non_content or re.fullmatch(r"-[a-zA-Z]*[clLq][a-zA-Z]*", word):
+                return []
+            if option in pattern_options or word.startswith(("-e", "-f")):
+                explicit_pattern = True
+            if option in value_options and not equals:
+                index += 1
+        else:
+            operands.append(word)
+    return operands if explicit_pattern else operands[1:]
+
+
+def python_reader_targets(arguments: list[str]) -> list[str]:
+    """Recognize literal open/Path reads printed by common Python -c snippets."""
+    try:
+        code = arguments[arguments.index("-c") + 1]
+        module = ast.parse(code)
+    except (ValueError, IndexError, SyntaxError):
+        return []
+    targets = []
+    conditional = (ast.Lambda, ast.IfExp, ast.BoolOp, ast.GeneratorExp,
+                   ast.ListComp, ast.SetComp, ast.DictComp)
+    for statement in module.body:
+        if not isinstance(statement, ast.Expr):
+            continue
+        expression = statement.value
+        if not (isinstance(expression, ast.Call) and isinstance(expression.func, ast.Name)
+                and expression.func.id == "print"):
+            continue
+        if any(isinstance(node, conditional) for node in ast.walk(expression)):
+            continue
+        for node in ast.walk(expression):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            source = node.func.value
+            if not isinstance(source, ast.Call) or not source.args:
+                continue
+            factory = source.func
+            factory_name = factory.id if isinstance(factory, ast.Name) else (
+                factory.attr if isinstance(factory, ast.Attribute) else ""
+            )
+            if (factory_name, node.func.attr) not in {("open", "read"), ("Path", "read_text")}:
+                continue
+            filename = source.args[0]
+            if isinstance(filename, ast.Constant) and isinstance(filename.value, str):
+                targets.append(filename.value)
+    return targets
+
+
 def skill_activation_evidence(
     events: Iterable[dict], skill_name: str, reference: str | None = None
 ) -> list[str]:
@@ -361,14 +474,68 @@ def skill_activation_evidence(
         if exit_code is not None and exit_code != 0:
             continue
         command = str(item.get("command", ""))
-        normalized = re.sub(r"/+", "/", command.replace("\\", "/").lower())
-        if (
-            READ_COMMAND_RE.search(normalized)
-            and path_pattern.search(normalized)
-            and command not in evidence
-        ):
-            evidence.append(command)
+        if not str(item.get("aggregated_output", "")).strip():
+            continue
+        body = command
+        if re.search(r"\s-command\s", command, re.IGNORECASE):
+            try:
+                shell_arguments = shlex.split(command)
+                command_index = next(
+                    index for index, word in enumerate(shell_arguments)
+                    if word.lower() == "-command"
+                )
+                body = shell_arguments[command_index + 1]
+            except (ValueError, StopIteration, IndexError):
+                continue
+        for read in READ_COMMAND_RE.finditer(body):
+            segment = read_command_segment(body, read.end())
+            reader = read.group("reader").lower()
+            targets = [segment]
+            try:
+                if reader in {"rg", "grep"}:
+                    targets = search_reader_targets(shlex.split(segment.replace("\\", "/")))
+                elif reader.startswith("python") or reader in {"py", "py.exe"}:
+                    targets = python_reader_targets(shlex.split(segment))
+                elif reader == "select-string" and re.search(r"(?:^|\s)-(?:list|quiet)\b", segment, re.IGNORECASE):
+                    continue
+            except ValueError:
+                continue
+            if not any(path_pattern.search(re.sub(r"/+", "/", target.replace("\\", "/").lower()))
+                       for target in targets):
+                continue
+            if command not in evidence:
+                evidence.append(command)
+            break
     return evidence
+
+
+def tool_output_decode_errors(events: Iterable[dict]) -> list[dict]:
+    """Reject damaged tool text rather than score an answer based on unreadable input."""
+    errors = []
+    for event in events:
+        item = event.get("item") or {}
+        if (
+            event.get("type") != "item.completed"
+            or item.get("type") != "command_execution"
+            or item.get("exit_code") not in (None, 0)
+        ):
+            continue
+        output = str(item.get("aggregated_output", ""))
+        # Codex can cut a UTF-8 code point at a native byte-truncation seam.
+        # Only disregard the single replacement immediately beside its marker;
+        # damage elsewhere (including a second replacement) still fails closed.
+        seam = r"(?P<before>\ufffd)?(?P<marker>\r?\n\.\.\. \d+ bytes omitted \.\.\.\r?\n)(?P<after>\ufffd)?"
+        def preserve_damage(match: re.Match) -> str:
+            if bool(match.group("before")) + bool(match.group("after")) == 1:
+                return match.group("marker")
+            return match.group(0)
+        output = re.sub(seam, preserve_damage, output)
+        if replacement_characters := output.count("\ufffd"):
+            errors.append({
+                "command": str(item.get("command", "")),
+                "replacement_characters": replacement_characters,
+            })
+    return errors
 
 
 def bsl_blocks(response: str) -> list[str]:
@@ -406,10 +573,11 @@ def executable_bsl_blocks(response: str) -> list[str]:
         # Saying that a hook must not be called can immediately precede the
         # correct procedure that implements it. A declaration is not itself
         # the prohibited call; explicit bad-example labels still win.
-        surrounding_context = f"{immediate_prefix}\n{immediate_suffix}"
+        surrounding_context = f"{immediate_prefix}\n{first_lines}\n{immediate_suffix}"
         direct_call_warning = bool(re.search(
             r"не\s+(?:следует|нужно|надо)\s+вызывать|не\s+вызывайте|"
-            r"вызывать[\s\S]{0,100}не\s+нужно",
+            r"вызывать[\s\S]{0,100}не\s+нужно|"
+            r"напрямую[^.\n;]{0,40}не\s+вызыва|напрямую\s+вызывать\s+нельзя",
             surrounding_context,
             re.I,
         ))
@@ -626,7 +794,7 @@ def staged_skill(skill_dir: Path, target: Path) -> Iterator[None]:
     if target.exists():
         raise EvalError(f"Refusing to overwrite existing staged skill: {target}")
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(skill_dir, target)
+    shutil.copytree(skill_dir, target, ignore=shutil.ignore_patterns(*SKILL_CACHE_PATTERNS))
     try:
         yield
     finally:
@@ -665,7 +833,13 @@ def build_cdx_command(
         # fails closed by rejecting even read-only shell commands. Select the
         # restricted-token backend explicitly while keeping evals isolated
         # from all other user settings.
-        command.extend(["-c", 'windows.sandbox="unelevated"'])
+        command.extend([
+            "-c", 'windows.sandbox="unelevated"',
+            "-c", "allow_login_shell=false",
+            "-c", 'shell_environment_policy.set.PYTHONIOENCODING="utf-8"',
+            "-c", 'shell_environment_policy.set.PYTHONUTF8="1"',
+            "-c", "developer_instructions=" + json.dumps(WINDOWS_READING_INSTRUCTIONS),
+        ])
     command.extend(["-C", str(workdir)])
     if model:
         command.extend(["--model", model])
@@ -736,6 +910,7 @@ def run_cdx(
         "returncode": returncode,
         "timed_out": timed_out,
         "tool_policy_blocked": tool_policy_blocked,
+        "tool_output_decode_errors": tool_output_decode_errors(events),
         "elapsed_seconds": round(elapsed, 3),
         "usage": usage_from_events(events),
         "response": response,
@@ -755,6 +930,8 @@ def infrastructure_reason(execution: dict) -> str | None:
         return "timeout"
     if execution.get("tool_policy_blocked"):
         return "sandbox_policy"
+    if execution.get("tool_output_decode_errors"):
+        return "tool_output_encoding"
     stderr = str(execution.get("stderr_tail", ""))
     if execution.get("returncode", 0) != 0 or not str(execution.get("response", "")).strip():
         for reason, pattern in INFRASTRUCTURE_PATTERNS:
@@ -933,8 +1110,8 @@ def atomic_write_json(path: Path, payload: dict) -> None:
 
 def validate_resume_report(report: dict, expected: dict) -> None:
     """Reject resume requests that could mix incomparable evaluation results."""
-    if report.get("schema_version") != 3:
-        raise EvalError("--resume requires a schema_version=3 report")
+    if report.get("schema_version") != REPORT_SCHEMA_VERSION:
+        raise EvalError(f"--resume requires a schema_version={REPORT_SCHEMA_VERSION} report")
     for key, expected_value in expected.items():
         if report.get(key) != expected_value:
             raise EvalError(
@@ -1102,6 +1279,7 @@ def main() -> None:
             "corpus_sha256": file_sha256(cases_path),
             "reference_matrix_sha256": file_sha256(matrix_path),
             "skill_sha256": skill_sha256(skill_dir),
+            "runner_sha256": file_sha256(Path(__file__)),
             "runs": args.runs,
             "phases_requested": phases,
             "min_pass_rate": args.min_pass_rate,
@@ -1136,7 +1314,7 @@ def main() -> None:
         else:
             artifact_dir.mkdir(parents=True, exist_ok=False)
             report = {
-                "schema_version": 3,
+                "schema_version": REPORT_SCHEMA_VERSION,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 **report_settings,
                 "jobs": args.jobs,

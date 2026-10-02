@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -135,6 +136,7 @@ class JsonlTests(unittest.TestCase):
                 "command": "Get-Content C:\\repo\\.agents\\skills\\bsp\\SKILL.md",
             },
         }]
+        events[0]["item"]["aggregated_output"] = "# Применение БСП\nПравила и примеры."
         evidence = runner.skill_activation_evidence(events, "bsp")
         self.assertEqual(len(evidence), 1)
 
@@ -197,6 +199,10 @@ class JsonlTests(unittest.TestCase):
             },
         }]
 
+        for items in (skill_read, correct_relative_reference, correct_absolute_reference,
+                      wrong_reference, similarly_named_file, non_read_command,
+                      incomplete_read, failed_read):
+            items[0]["item"]["aggregated_output"] = "# Сценарий\nПравила и BSL-пример."
         self.assertEqual(len(runner.skill_activation_evidence(skill_read, "bsp")), 1)
         self.assertEqual(
             runner.skill_activation_evidence(skill_read, "bsp", reference="prefixes.md"),
@@ -249,6 +255,68 @@ class JsonlTests(unittest.TestCase):
             1,
         )
 
+    def test_file_listing_count_and_empty_output_do_not_prove_reference_read(self):
+        path = ".agents/skills/bsp/references/prefixes.md"
+        for command in (f"rg --files {path}", f"rg -l Префикс {path}",
+                        f"rg --files-with-matches Префикс {path}",
+                        f"rg -c Префикс {path}", f"grep -l Префикс {path}"):
+            with self.subTest(command=command):
+                events = [{"type": "item.completed", "item": {
+                    "type": "command_execution", "exit_code": 0,
+                    "command": command, "aggregated_output": path,
+                }}]
+                self.assertEqual(runner.skill_activation_evidence(events, "bsp", "prefixes.md"), [])
+        events[0]["item"].update(command=f"rg -n Префикс {path}", aggregated_output="")
+        self.assertEqual(runner.skill_activation_evidence(events, "bsp", "prefixes.md"), [])
+
+    def test_read_command_and_reference_must_be_in_same_shell_segment(self):
+        path = ".agents/skills/bsp/references/prefixes.md"
+        events = [{"type": "item.completed", "item": {
+            "type": "command_execution", "exit_code": 0,
+            "command": f"rg -n rule README.md; echo {path}",
+            "aggregated_output": f"1:rule\n{path}",
+        }}]
+        self.assertEqual(runner.skill_activation_evidence(events, "bsp", "prefixes.md"), [])
+        events[0]["item"].update(
+            command=f"rg --files; Get-Content {path}",
+            aggregated_output="# Префиксы\nСценарий реализации.",
+        )
+        self.assertEqual(len(runner.skill_activation_evidence(events, "bsp", "prefixes.md")), 1)
+
+    def test_rg_pattern_operand_is_not_a_read_target(self):
+        path = ".agents/skills/bsp/references/prefixes.md"
+        for command in (f"rg -n -- {path} README.md",
+                        f"rg -n -g '*.md' {path} README.md",
+                        f"rg -n -e {path} README.md"):
+            events = [{"type": "item.completed", "item": {
+                "type": "command_execution", "exit_code": 0,
+                "command": command, "aggregated_output": f"README.md:1:{path}",
+            }}]
+            self.assertEqual(runner.skill_activation_evidence(events, "bsp", "prefixes.md"), [])
+        for command in (f"rg -n -C 3 Префикс {path}",
+                        f"rg -n -e Префикс -- {path}",
+                        f"rg -n -g '*.md' Префикс {path}"):
+            events[0]["item"]["command"] = command
+            self.assertEqual(len(runner.skill_activation_evidence(events, "bsp", "prefixes.md")), 1)
+
+    def test_python_inline_reader_is_observable_but_a_filename_print_is_not(self):
+        path = ".agents/skills/bsp/references/prefixes.md"
+        programs = (
+            f"print(open('{path}', encoding='utf-8').read())",
+            f"from pathlib import Path; print(Path('{path}').read_text(encoding='utf-8'))",
+        )
+        for program in programs:
+            direct = f'python -c "{program}"'
+            wrapped = 'pwsh -NoProfile -Command ' + json.dumps(direct)
+            for command in (direct, wrapped):
+                events = [{"type": "item.completed", "item": {
+                    "type": "command_execution", "exit_code": 0,
+                    "command": command, "aggregated_output": "# Префиксы\nСценарий реализации.",
+                }}]
+                self.assertEqual(len(runner.skill_activation_evidence(events, "bsp", "prefixes.md")), 1)
+        events[0]["item"]["command"] = f'python -c "print(\'{path}\')"'
+        self.assertEqual(runner.skill_activation_evidence(events, "bsp", "prefixes.md"), [])
+
     def test_correct_answer_alone_is_not_activation(self):
         events = [{
             "type": "item.completed",
@@ -282,6 +350,18 @@ class CdxCommandTests(unittest.TestCase):
             "cdx", self.case, Path("/work"), None, None, platform_name="posix"
         )
         self.assertNotIn('windows.sandbox="unelevated"', command)
+        self.assertNotIn("allow_login_shell=false", command)
+        self.assertFalse(any(arg.startswith("developer_instructions=") for arg in command))
+
+    def test_windows_uses_utf8_readers_without_user_profiles(self):
+        command = runner.build_cdx_command(
+            "cdx", self.case, Path("C:/work"), None, None, platform_name="nt"
+        )
+        self.assertIn("allow_login_shell=false", command)
+        self.assertIn('shell_environment_policy.set.PYTHONIOENCODING="utf-8"', command)
+        instructions = next(arg for arg in command if arg.startswith("developer_instructions="))
+        self.assertIn("rg -n", json.loads(instructions.split("=", 1)[1]))
+        self.assertEqual(command[-1], self.case.task)
 
     def test_luna_is_the_default_eval_model(self):
         args = runner.build_parser().parse_args([])
@@ -432,6 +512,18 @@ class ResponseScoringTests(unittest.TestCase):
         self.assertTrue(
             runner.score_response(case, response, {})["passed"]
         )
+
+    def test_hook_implementation_survives_warning_inside_code_comment(self):
+        response = """```bsl
+// Прикладная реализация хука БСП.
+// БСП вызывает эту процедуру; напрямую её не вызывают.
+Процедура ПолучитьПрефиксообразующиеРеквизиты(Объекты) Экспорт
+    СтрокаОбъектов = Объекты.Добавить();
+КонецПроцедуры
+```"""
+        self.assertEqual(len(runner.executable_bsl_blocks(response)), 1)
+        negative = response.replace("// Прикладная реализация хука БСП.", "// Антипаттерн: неверная реализация.")
+        self.assertEqual(runner.executable_bsl_blocks(negative), [])
 
     def test_hook_implementation_survives_warning_after_code_block(self):
         response = (
@@ -587,6 +679,29 @@ class StagingTests(unittest.TestCase):
             self.assertFalse(target.exists())
             self.assertTrue(other.is_file())
 
+    def test_python_cache_is_not_part_of_shipped_staging_or_fingerprint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            (source / "SKILL.md").write_text("# Skill", encoding="utf-8")
+            reference = source / "references" / "topic.md"
+            reference.parent.mkdir()
+            reference.write_text("Verified scenario", encoding="utf-8")
+            before = runner.skill_sha256(source)
+            cache = source / "scripts" / "__pycache__" / "api.cpython-312.pyc"
+            cache.parent.mkdir(parents=True)
+            cache.write_bytes(b"machine-specific bytecode")
+            (source / "legacy.pyc").write_bytes(b"old bytecode")
+            self.assertEqual(runner.skill_sha256(source), before)
+            target = root / "consumer" / ".agents" / "skills" / "bsp"
+            with runner.staged_skill(source, target):
+                self.assertEqual(runner.skill_sha256(target), before)
+                self.assertFalse(list(target.rglob("*.pyc")))
+                self.assertFalse(list(target.rglob("__pycache__")))
+            reference.write_text("Changed scenario", encoding="utf-8")
+            self.assertNotEqual(runner.skill_sha256(source), before)
+
     def test_staging_refuses_to_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / ".agents" / "skills" / "bsp"
@@ -624,6 +739,84 @@ class ExecutionStatusTests(unittest.TestCase):
             runner.execution_status(self._execution(response="")),
             "incomplete",
         )
+
+    def test_corrupt_tool_output_is_infrastructure_even_when_answer_passes(self):
+        event = {
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "Get-Content -Encoding UTF8 reference.md",
+                "exit_code": 0,
+                "aggregated_output": "# \ufffd\ufffd\ufffd",
+            },
+        }
+        stdout = json.dumps(event) + '\n' + json.dumps({
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "Готово"},
+        })
+        completed = runner.subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            runner.subprocess, "run", return_value=completed
+        ):
+            execution = runner.run_cdx(
+                "cdx", ParallelExecutionTests._case("decode-error"), Path(tmp),
+                Path(tmp), "green", 1, None, None, 10, "bsp",
+            )
+        execution["score"] = {"passed": True}
+        self.assertEqual(execution["tool_output_decode_errors"], [{
+            "command": "Get-Content -Encoding UTF8 reference.md",
+            "replacement_characters": 3,
+        }])
+        self.assertEqual(runner.infrastructure_reason(execution), "tool_output_encoding")
+        self.assertEqual(runner.execution_status(execution), "infrastructure_failed")
+        self.assertIsNone(
+            runner.resume_run_matrix([ParallelExecutionTests._case("decode-error")], 1,
+                                     {"decode-error": [execution]})[0][0]
+        )
+
+    def test_utf8_tool_output_is_not_an_encoding_failure(self):
+        events = [{
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution", "exit_code": 0,
+                "command": "rg -n '^' reference.md",
+                "aggregated_output": "1:# Печать и варианты отчётов",
+            },
+        }]
+        self.assertEqual(runner.tool_output_decode_errors(events), [])
+
+    def test_encoding_check_allows_only_known_utf8_truncation_boundaries(self):
+        outputs = [
+            "cf/Тип\ufffd\n... 162166 bytes omitted ...\nPicture.xml",
+            "Module.bsl\n... 12345 bytes omitted ...\n\ufffdавила.xml",
+        ]
+        for output in outputs:
+            with self.subTest(output=output):
+                events = [{"type": "item.completed", "item": {
+                    "type": "command_execution", "exit_code": 0,
+                    "command": "rg --files", "aggregated_output": output,
+                }}]
+                self.assertEqual(runner.tool_output_decode_errors(events), [])
+        events[0]["item"]["aggregated_output"] = "\ufffd\n... 10 bytes omitted ...\n\ufffd"
+        self.assertEqual(runner.tool_output_decode_errors(events)[0]["replacement_characters"], 2)
+        for output in ("cf/Тип\ufffd", "\ufffd\ufffd\n... 10 bytes omitted ...\nvalid",
+                       "bad\ufffd text\n... 10 bytes omitted ...\n\ufffdtail"):
+            with self.subTest(output=output):
+                events[0]["item"]["aggregated_output"] = output
+                self.assertEqual(runner.tool_output_decode_errors(events)[0]["replacement_characters"], 1)
+
+    def test_encoding_check_ignores_failed_commands_and_agent_prose(self):
+        events = [{
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution", "exit_code": 1,
+                "command": "failed-reader", "aggregated_output": "\ufffd",
+            },
+        }, {
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "\ufffd"},
+        }]
+        self.assertEqual(runner.tool_output_decode_errors(events), [])
 
     def test_infrastructure_reason_is_classified(self):
         examples = {
@@ -725,12 +918,16 @@ class SummaryTests(unittest.TestCase):
 class ResumeReportTests(unittest.TestCase):
     def test_resume_report_rejects_old_activation_semantics(self):
         report = {"schema_version": 2}
-        with self.assertRaisesRegex(runner.EvalError, "schema_version=3"):
+        with self.assertRaisesRegex(runner.EvalError, "schema_version=4"):
             runner.validate_resume_report(report, {})
+
+    def test_resume_report_rejects_pre_encoding_check_semantics(self):
+        with self.assertRaisesRegex(runner.EvalError, "schema_version=4"):
+            runner.validate_resume_report({"schema_version": 3}, {})
 
     def test_resume_report_rejects_incompatible_model(self):
         report = {
-            "schema_version": 3,
+            "schema_version": 4,
             "model": "old-model",
             "selected_cases": ["case-a"],
             "runs": 1,
@@ -744,6 +941,12 @@ class ResumeReportTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(runner.EvalError, "model"):
             runner.validate_resume_report(report, expected)
+
+    def test_resume_report_rejects_changed_runner(self):
+        report = {"schema_version": 4, "runner_sha256": "old"}
+        with self.assertRaisesRegex(runner.EvalError, "runner_sha256"):
+            runner.validate_resume_report(report, {"runner_sha256": "new"})
+        runner.validate_resume_report(report, {"runner_sha256": "old"})
 
     def test_atomic_report_write_replaces_destination(self):
         with tempfile.TemporaryDirectory() as tmp:
