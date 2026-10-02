@@ -64,6 +64,9 @@ CALL_RE = re.compile(
     r"(?<![\w.])(?P<module>[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё0-9_]*)\s*\.\s*"
     r"(?P<method>[A-Za-zА-Яа-яЁё_][A-Za-zА-Яа-яЁё0-9_]*)\s*\("
 )
+MEMBER_ACCESS_RE = re.compile(
+    r"(?<=[A-Za-zА-Яа-яЁё0-9_])\s*\.\s*(?=[A-Za-zА-Яа-яЁё_])"
+)
 READ_COMMAND_RE = re.compile(
     r"(?:^|-command\s+[\"']?|[;&|]\s*|[\r\n]\s*)"
     r"(?P<reader>get-content|gc|cat|type|more|head|tail|sed|awk|rg|grep|select-string|"
@@ -75,7 +78,7 @@ NEGATIVE_BLOCK_RE = re.compile(
     r"(?:не\s+(?:следует|вызыва|существ|нужно|запуска|команд|долж|явля|подход)|"
     r"(?:публичн|метод|модул|вызов)[^.\n]{0,120}\bнет\b|нельзя|"
     r"неправиль|ошибочн|невер|ложн|"
-    r"антипаттерн|запрещ)",
+    r"антипаттерн|запрещ(?:[её]н\w*|\w*\s+вызыв\w*))",
     re.I,
 )
 NEGATIVE_CONNECTOR_RE = re.compile(r"^(?:или|либо|и|or|and)\s*[:;,.]?$", re.I)
@@ -538,6 +541,53 @@ def tool_output_decode_errors(events: Iterable[dict]) -> list[dict]:
     return errors
 
 
+def bsl_code_views(code: str) -> tuple[str, str]:
+    """Pair comment-free BSL with an aligned view masking string literals."""
+    values = list(code)
+    syntax = list(code)
+    in_string = False
+    index = 0
+    while index < len(code):
+        char = code[index]
+        if in_string:
+            if char not in "\r\n":
+                syntax[index] = " "
+            if char == '"':
+                if index + 1 < len(code) and code[index + 1] == '"':
+                    syntax[index + 1] = " "
+                    index += 1
+                else:
+                    in_string = False
+        elif char == '"':
+            in_string = True
+            syntax[index] = " "
+        elif code.startswith("//", index):
+            end = code.find("\n", index)
+            end = len(code) if end < 0 else end
+            for position in range(index, end):
+                if code[position] not in "\r\n":
+                    values[position] = syntax[position] = " "
+            index = end - 1
+        index += 1
+    value_text, syntax_text = "".join(values), "".join(syntax)
+    # Apply identical edits only to actual member access, not dotted text in
+    # literals such as a handler name or a URL. The paired offsets stay aligned.
+    for match in reversed(list(MEMBER_ACCESS_RE.finditer(syntax_text))):
+        value_text = value_text[:match.start()] + "." + value_text[match.end():]
+        syntax_text = syntax_text[:match.start()] + "." + syntax_text[match.end():]
+    return value_text, syntax_text
+
+
+def executable_pattern_hit(pattern: str, values: str, syntax: str) -> bool:
+    """An assertion may inspect literal arguments but cannot start inside one."""
+    for match in re.finditer(pattern, values, re.I | re.S):
+        first_token = next((index for index in range(match.start(), match.end())
+                            if not values[index].isspace()), None)
+        if first_token is not None and not syntax[first_token].isspace():
+            return True
+    return False
+
+
 def bsl_blocks(response: str) -> list[str]:
     blocks = [match.group("code") for match in BSL_FENCE_RE.finditer(response)]
     if blocks:
@@ -547,16 +597,39 @@ def bsl_blocks(response: str) -> list[str]:
     return []
 
 
+def warning_targets_other_calls(context: str, code_syntax: str) -> bool:
+    context_calls = {
+        (call.group("module").lower(), call.group("method").lower())
+        for call in CALL_RE.finditer(normalize_member_access(context))
+    }
+    if context_calls:
+        code_calls = {
+            (call.group("module").lower(), call.group("method").lower())
+            for call in CALL_RE.finditer(code_syntax)
+        }
+        return code_calls.isdisjoint(context_calls)
+    context_names = set(re.findall(r"\b(\w+)\s*\(", context.lower()))
+    code_names = set(re.findall(r"\b(\w+)\s*\(", code_syntax.lower()))
+    return bool(context_names) and code_names.isdisjoint(context_names)
+
+
 def executable_bsl_blocks(response: str) -> list[str]:
     """Exclude fenced snippets explicitly presented as incorrect examples."""
     matches = list(BSL_FENCE_RE.finditer(response))
     if not matches:
         return bsl_blocks(response)
     negative = []
-    for match in matches:
-        prefix = response[max(0, match.start() - 240):match.start()]
+    for index, match in enumerate(matches):
+        previous_end = matches[index - 1].end() if index else 0
+        prefix = response[max(previous_end, match.start() - 240):match.start()]
         immediate_prefix = re.split(r"\n\s*\n", prefix.rstrip())[-1]
-        suffix = response[match.end():match.end() + 320]
+        sentences = re.split(r"(?<=[.!?])\s+", immediate_prefix)
+        # A correction can contain "the advice is wrong" before the actual
+        # recommendation. Use its nearest sentence, except connecting labels.
+        if sentences and not re.fullmatch(r"(?:в частности|например)\s*[:.]?", sentences[-1], re.I):
+            immediate_prefix = sentences[-1]
+        next_start = matches[index + 1].start() if index + 1 < len(matches) else len(response)
+        suffix = response[match.end():min(next_start, match.end() + 320)]
         immediate_suffix = re.split(r"\n\s*\n", suffix.lstrip())[0]
         code = match.group("code")
         first_lines = "\n".join(code.splitlines()[:3])
@@ -565,10 +638,27 @@ def executable_bsl_blocks(response: str) -> list[str]:
             re.sub(r"(?m)^\s*//[^\n]*(?:\n|$)", "", code).lstrip(),
             re.I,
         ))
+        suffix_negative = bool(NEGATIVE_BLOCK_RE.search(immediate_suffix))
+        if (index + 1 < len(matches) and immediate_suffix.rstrip().endswith(":")
+                and immediate_suffix.strip() in response[match.end():matches[index + 1].start()]):
+            # A heading introducing the next fence does not label this one.
+            suffix_negative = False
+        code_syntax = bsl_code_views(code)[1]
+        explicit_suffix_label = bool(re.search(
+            r"ложн|ошибоч|неправиль|неверн|антипаттерн|нельзя\s+так",
+            immediate_suffix, re.I,
+        ))
+        # A warning against another API after a correct fence is not a label
+        # saying that this fence is an incorrect example. Keep validating it.
+        if warning_targets_other_calls(immediate_suffix, code_syntax) and not explicit_suffix_label:
+            suffix_negative = False
+        prefix_negative = bool(NEGATIVE_BLOCK_RE.search(immediate_prefix))
+        if warning_targets_other_calls(immediate_prefix, code_syntax) and not re.search(
+            r"ложн|ошибоч|неправиль|неверн|антипаттерн|нельзя\s+так", immediate_prefix, re.I
+        ):
+            prefix_negative = False
         negative_context = bool(
-            NEGATIVE_BLOCK_RE.search(immediate_prefix)
-            or NEGATIVE_BLOCK_RE.search(immediate_suffix)
-            or NEGATIVE_BLOCK_RE.search(first_lines)
+            prefix_negative or suffix_negative or NEGATIVE_BLOCK_RE.search(first_lines)
         )
         # Saying that a hook must not be called can immediately precede the
         # correct procedure that implements it. A declaration is not itself
@@ -617,11 +707,7 @@ def executable_bsl_blocks(response: str) -> list[str]:
 
 
 def normalize_member_access(text: str) -> str:
-    return re.sub(
-        r"(?<=[A-Za-zА-Яа-яЁё0-9_])\s*\.\s*(?=[A-Za-zА-Яа-яЁё_])",
-        ".",
-        text,
-    )
+    return MEMBER_ACCESS_RE.sub(".", text)
 
 
 def score_response(
@@ -642,9 +728,10 @@ def score_response(
     ]
     blocks = bsl_blocks(response)
     executable_blocks = executable_bsl_blocks(response)
-    bsl_text = normalize_member_access("\n".join(executable_blocks))
+    code_views = [bsl_code_views(code) for code in executable_blocks]
+    bsl_text, bsl_syntax = bsl_code_views("\n".join(executable_blocks))
     required_code_hits = [
-        bool(re.search(pattern, bsl_text, flags))
+        executable_pattern_hit(pattern, bsl_text, bsl_syntax)
         for pattern in case.required_code_patterns
     ]
     # Each block-pattern must be demonstrated in a distinct executable fence.
@@ -655,7 +742,7 @@ def score_response(
         matching_block = next(
             (
                 index for index in sorted(unmatched_blocks)
-                if re.search(pattern, executable_blocks[index], flags)
+                if executable_pattern_hit(pattern, *code_views[index])
             ),
             None,
         )
@@ -664,7 +751,7 @@ def score_response(
             unmatched_blocks.remove(matching_block)
     forbidden_hits = [
         pattern for pattern in case.forbidden_patterns + case.forbidden_code_patterns
-        if re.search(pattern, bsl_text, flags)
+        if executable_pattern_hit(pattern, bsl_text, bsl_syntax)
     ]
     grounding_patterns = case.activation_patterns or case.required_patterns
     grounding_hits = sum(
@@ -676,8 +763,8 @@ def score_response(
     calls = []
     invalid_methods = []
     unsafe_calls = []
-    for code in executable_blocks:
-        for match in CALL_RE.finditer(code):
+    for _values, syntax in code_views:
+        for match in CALL_RE.finditer(syntax):
             module_name = match.group("module")
             method_name = match.group("method")
             if module_name not in method_index:
@@ -698,7 +785,7 @@ def score_response(
     )
     activation_ok = skill_activated if case.should_trigger else not skill_activated
     reference_ok = reference_read if require_reference else True
-    bsl_ok = bool(blocks) if case.requires_bsl else True
+    bsl_ok = any(syntax.strip() for _values, syntax in code_views) if case.requires_bsl else True
     quality_passed = (
         bool(response.strip())
         and expected_ok

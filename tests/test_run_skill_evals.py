@@ -394,6 +394,46 @@ class ResponseScoringTests(unittest.TestCase):
         self.assertTrue(score["passed"])
         self.assertEqual(score["method_accuracy"], 1.0)
 
+    def test_warning_about_another_call_does_not_hide_recommended_code(self):
+        suffix = "\n\nТестовыйМодуль.ДругойМетод() использовать не следует."
+        good = "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```" + suffix
+        score = runner.score_response(self.case, good, self.method_index)
+        self.assertEqual(score["known_module_calls"], ["ТестовыйМодуль.СтабильныйМетод"])
+        unsafe = "```bsl\nТестовыйМодуль.СтабильныйМетод();\nТестовыйМодуль.Опечатка();\n```" + suffix
+        score = runner.score_response(self.case, unsafe, self.method_index)
+        self.assertFalse(score["passed"])
+        self.assertEqual(score["invalid_methods"], ["ТестовыйМодуль.Опечатка"])
+
+    def test_unqualified_warning_does_not_hide_invalid_call_in_another_fence(self):
+        response = (
+            "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```\n\n"
+            "```bsl\nТестовыйМодуль.Опечатка();\n```\n\n"
+            "ДругойМетод() использовать не следует."
+        )
+        score = runner.score_response(self.case, response, self.method_index)
+        self.assertFalse(score["passed"])
+        self.assertEqual(score["invalid_methods"], ["ТестовыйМодуль.Опечатка"])
+
+    def test_correction_in_intro_does_not_hide_the_recommended_call(self):
+        response = (
+            "Совет верен по сути, но имя модуля указано неправильно. "
+            "ТестовыйМодуль.СтабильныйМетод — стабильный API для этой задачи.\n\n"
+            "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```"
+        )
+        self.assertEqual(runner.score_response(self.case, response, self.method_index)["known_module_calls"],
+                         ["ТестовыйМодуль.СтабильныйМетод"])
+
+    def test_comments_and_strings_do_not_become_api_calls(self):
+        response = (
+            '```bsl\nТестовыйМодуль.СтабильныйМетод();\n'
+            'Сообщить("https://example.test/ТестовыйМодуль.Опечатка()");\n'
+            '// ТестовыйМодуль.Опечатка();\n```'
+        )
+        score = runner.score_response(self.case, response, self.method_index)
+        self.assertTrue(score["passed"])
+        self.assertEqual(score["known_module_calls"], ["ТестовыйМодуль.СтабильныйМетод"])
+        self.assertEqual(score["invalid_methods"], [])
+
     def test_missing_export_is_a_definite_hallucination(self):
         response = "```bsl\nТестовыйМодуль.СтабильныйМетод();\nТестовыйМодуль.Опечатка();\n```"
         score = runner.score_response(self.case, response, self.method_index)
@@ -663,6 +703,149 @@ class ResponseScoringTests(unittest.TestCase):
         )
         self.assertTrue(clean["passed"])
         self.assertFalse(contaminated["passed"])
+
+
+class CorpusCriteriaTests(unittest.TestCase):
+    @staticmethod
+    def case(case_id):
+        return next(case for case in runner.load_cases(runner.DEFAULT_CASES) if case.id == case_id)
+
+    def test_safe_write_accepts_equivalent_module_correction(self):
+        case = self.case("update-safe-write-module-name")
+        response = (
+            "В совете указан не тот общий модуль: ОбновлениеИнформационнойБазыСервер.\n\n"
+            "Правильный минимальный вызов:\n```bsl\n"
+            "ОбновлениеИнформационнойБазы.ЗаписатьДанные(ДокументОбъект);\n```"
+        )
+        self.assertTrue(runner.score_response(case, response, {})["passed"])
+        alternative = (
+            "Общий модуль называется ОбновлениеИнформационнойБазы, без суффикса `Сервер`.\n\n"
+            "Правильный минимальный вызов:\n```bsl\n"
+            "ОбновлениеИнформационнойБазы.ЗаписатьОбъект(ДокументОбъект, Ложь, Ложь);\n```"
+        )
+        self.assertTrue(runner.score_response(case, alternative, {})["passed"])
+
+    def test_safe_write_requires_executable_call_with_safe_flags(self):
+        case = self.case("update-safe-write-module-name")
+        prefix = "ОбновлениеИнформационнойБазыСервер не существует.\n\nПравильный вызов:\n"
+        for method in ("ЗаписатьДанные", "ЗаписатьОбъект"):
+            for arguments in ("ДокументОбъект", "ДокументОбъект, Ложь, Ложь",
+                              "ДокументОбъект, Неопределено, Ложь", "ДокументОбъект, , Ложь"):
+                response = prefix + f"```bsl\nОбновлениеИнформационнойБазы.{method}({arguments});\n```"
+                self.assertTrue(runner.score_response(case, response, {})["passed"])
+            for arguments in ("ДокументОбъект, Истина, Ложь", "ДокументОбъект, Ложь, Истина"):
+                response = prefix + f"```bsl\nОбновлениеИнформационнойБазы.{method}({arguments});\n```"
+                self.assertFalse(runner.score_response(case, response, {})["passed"])
+        for method, mode, expected in (
+            ("ЗаписатьОбъект", "РежимЗаписиДокумента.Запись", True),
+            ("ЗаписатьОбъект", "РежимЗаписиДокумента.Проведение", False),
+            ("ЗаписатьДанные", "РежимЗаписиДокумента.Запись", False),
+        ):
+            response = prefix + f"```bsl\nОбновлениеИнформационнойБазы.{method}(ДокументОбъект, Ложь, Ложь, {mode});\n```"
+            self.assertEqual(runner.score_response(case, response, {})["passed"], expected)
+        response = prefix + (
+            "ОбновлениеИнформационнойБазы.ЗаписатьДанные(ДокументОбъект).\n\n"
+            "```bsl\n// Здесь должен быть правильный вызов.\n```"
+        )
+        self.assertFalse(runner.score_response(case, response, {})["passed"])
+
+    def test_safe_write_comment_or_string_is_not_executable_evidence(self):
+        case = self.case("update-safe-write-module-name")
+        prefix = "ОбновлениеИнформационнойБазыСервер не существует.\n\nПравильный вызов:\n"
+        for code in (
+            "// ОбновлениеИнформационнойБазы.ЗаписатьДанные(ДокументОбъект);",
+            'Сообщить("ОбновлениеИнформационнойБазы.ЗаписатьДанные(ДокументОбъект)");',
+        ):
+            score = runner.score_response(case, prefix + f"```bsl\n{code}\n```", {})
+            self.assertFalse(score["passed"])
+        response = prefix + '''```bsl
+ОбновлениеИнформационнойБазы.ЗаписатьДанные(
+    ДокументОбъект,
+    Ложь, // Отключить регистрацию
+    Ложь  // Отключить бизнес-логику
+);
+```'''
+        self.assertTrue(runner.score_response(case, response, {})["passed"])
+
+    def test_equivalent_native_warning_phrasings_are_accepted(self):
+        case = self.case("update-safe-write-module-name")
+        response = (
+            "В имени модуля лишний суффикс `Сервер`.\n\n"
+            "Правильный вызов:\n```bsl\n"
+            "ОбновлениеИнформационнойБазы.ЗаписатьДанные(ДокументОбъект);\n```"
+        )
+        self.assertTrue(runner.score_response(case, response, {})["passed"])
+        explains_flags = response.replace(
+            "ЗаписатьДанные(ДокументОбъект)", "ЗаписатьДанные(ДокументОбъект, Ложь, Ложь)"
+        ) + "\n\nПервое Ложь запрещает регистрацию на узлах обмена, второе отключает бизнес-логику."
+        self.assertTrue(runner.score_response(case, explains_flags, {})["passed"])
+        fundamental = self.case("fundamentals-module-and-api-boundaries")
+        response = '''ОбщегоНазначения — сервер; ОбщегоНазначенияКлиент — клиент.
+ОбщегоНазначенияКлиентСервер — общие алгоритмы без обращения к БД.
+ОбщегоНазначенияВызовСервера — серверный модуль с разрешённым вызовом с клиента.
+ОбщегоНазначенияСлужебный не существует; есть ОбщегоНазначенияСлужебныйКлиентСервер.
+ПрограммныйИнтерфейс — публичный; УстаревшиеПроцедурыИФункции — устаревший.
+СлужебныйПрограммныйИнтерфейс — служебный; совместимость его методов **не гарантируется**.'''
+        self.assertTrue(runner.score_response(fundamental, response, {})["passed"])
+        separate_sentence = response.replace(
+            "совместимость его методов **не гарантируется**",
+            "обратная совместимость гарантируется для стабильного API. Для служебных методов она **не гарантируется**",
+        )
+        self.assertTrue(runner.score_response(fundamental, separate_sentence, {})["passed"])
+        wrong_guarantee = response.replace("**не гарантируется**", "гарантируется")
+        self.assertFalse(runner.score_response(fundamental, wrong_guarantee, {})["passed"])
+        for server_phrase in (
+            "ОбщегоНазначенияВызовСервера — серверные методы для вызова с клиента.",
+            "Для вызовов с клиента предназначен серверный модуль `ОбщегоНазначенияВызовСервера`.",
+        ):
+            variant = response.replace(
+                "ОбщегоНазначенияВызовСервера — серверный модуль с разрешённым вызовом с клиента.", server_phrase
+            )
+            self.assertTrue(runner.score_response(fundamental, variant, {})["passed"])
+
+    def test_hook_warning_accepts_reverse_word_order_without_allowing_direct_call(self):
+        case = self.case("connected-command-hook-boundary")
+        frame = '''ПодключаемыеКомандыПереопределяемый:\n```bsl
+Процедура ПриОпределенииКомандПодключенныхКОбъекту(
+        НастройкиФормы, Источники, ПодключенныеОтчетыИОбработки, Команды) Экспорт
+    Если Источники.Строки.Найти("Документ.ЗаказКлиента", "ПолноеИмя") = Неопределено Тогда
+        Возврат;
+    КонецЕсли;
+    Команда = Команды.Добавить();
+    Команда.Вид = "СверкаОплаты";
+    Команда.Обработчик = "СверкаОплатыКлиент.ВыполнитьСверку";
+    ПодключаемыеКоманды.ДобавитьУсловиеВидимостиКоманды(Команда, "Проведен", Истина);
+КонецПроцедуры
+```'''
+        for warning in ("Сам хук напрямую вызывать нельзя.", "Хук вызывает сама БСП."):
+            self.assertTrue(runner.score_response(case, frame + "\n\n" + warning, {})["passed"])
+        self.assertFalse(runner.score_response(case, frame, {})["passed"])
+        for broken in (
+            frame.replace(") Экспорт", ")"),
+            frame.replace('Команда.Вид = "СверкаОплаты";', '// Вид не указан.'),
+            frame.replace('Команда.Вид = "СверкаОплаты";', 'Команда.ТипПараметраКоманды = "СверкаОплаты";'),
+        ):
+            self.assertFalse(runner.score_response(case, broken + "\n\nХук нельзя вызывать напрямую.", {})["passed"])
+        unsafe = frame.replace("КонецПроцедуры", "ПодключаемыеКомандыПереопределяемый."
+                               "ПриОпределенииКомандПодключенныхКОбъекту();\nКонецПроцедуры")
+        self.assertFalse(runner.score_response(case, unsafe + "\n\nХук нельзя вызывать напрямую.", {})["passed"])
+        wrong_visibility = frame.replace('"Проведен", Истина',
+                                         '"Проведен", Истина, ВидСравненияКомпоновкиДанных.НеРавно')
+        self.assertFalse(runner.score_response(case, wrong_visibility + "\n\nХук нельзя вызывать напрямую.", {})["passed"])
+
+    def test_fundamentals_requires_server_context_for_server_call_module(self):
+        case = self.case("fundamentals-module-and-api-boundaries")
+        response = '''ОбщегоНазначения — сервер; ОбщегоНазначенияКлиент — клиент.
+ОбщегоНазначенияКлиентСервер — общие алгоритмы без обращения к БД.
+ОбщегоНазначенияВызовСервера — серверный общий модуль с разрешённым вызовом с клиента.
+ОбщегоНазначенияСлужебный не существует; есть ОбщегоНазначенияСлужебныйКлиентСервер.
+ПрограммныйИнтерфейс — публичный; СлужебныйПрограммныйИнтерфейс — служебный;
+УстаревшиеПроцедурыИФункции — устаревший.
+Для служебных методов обратная совместимость не гарантируется.'''
+        self.assertTrue(runner.score_response(case, response, {})["passed"])
+        wrong_context = response.replace("серверный общий модуль с разрешённым вызовом с клиента",
+                                         "клиентский модуль, который делает серверный вызов")
+        self.assertFalse(runner.score_response(case, wrong_context, {})["passed"])
 
 
 class StagingTests(unittest.TestCase):
