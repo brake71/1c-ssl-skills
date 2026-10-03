@@ -263,7 +263,113 @@ comment-only PASS и скрытие неверного вызова предуп
 
 Статические проверки: 78 unit PASS, coverage 662/662 и 24 references,
 semantic 0 ERROR / 0 WARN, dry-run 27 cases / 24 references, diff-check PASS.
-Новый полный consumer 27 × 3 и неассистированный transport ещё не запущены.
+## Partial — полный consumer gate на `dca64bf`
+
+`.tmp/consumer-stage2-full-3x.json`: выполнены все RED/GREEN 27 × 3;
+**complete=false, gate FAIL**, так как 3 GREEN-запуска имеют
+`tool_output_encoding`. Из сводки исключены целиком эти 3 сценария:
+`save-attached-file-public-boundary`, `pd-destruction-date-public-boundary`,
+`contact-info-representation-public-boundary`. Во всех сбоях native `rg`
+передан в PowerShell `Select-String`, который перекодировал stdout.
+
+RED 13/27, GREEN 20/24 полных сценария; majority activation/reference-read
+23/23 scoped полных сценария. GREEN invalid/unsafe/forbidden/process/policy 0,
+quality failures 19, infrastructure 3. Majority quality не прошло у
+`update-safe-write-module-name`, `delete-marked-public-boundary`,
+`sms-public-wrapper-not-hook`, `fundamentals-module-and-api-boundaries`.
+Один из ответов fundamentals назвал `ВызовСервера` клиентскими методами;
+другой не дал требуемых полных имён. Update дважды молча исправил модуль,
+но назвал исходный неверный совет правильным. Эти ошибки не снимаются
+понижением требований.
+
+Все четыре fingerprint совпали с `dca64bf`; README-only fixture и отсутствие
+видимых developer sources подтверждены manifest. Отчёт оставлен исходным:
+resume не запущен, так как есть и ошибки качества. Это не unassisted consumer.
+
+При разборе SMS/delete-marked воспроизведён новый false negative: правильный
+BSL скрывается предупреждением о другом API, написанном без `()`, либо
+смешанной фразой «логин и пароль не нужны: используйте публичный API».
+Добавлен RED-capable regression с проверкой, что настоящий неверный вызов
+в том же блоке остаётся ошибкой. Исправление различает отрицательные clauses
+и положительную рекомендацию конкретного реального вызова. Детерминированная
+проверка шести сохранённых SMS/delete ответов теперь PASS; это локальный
+пересчёт для диагностики, **не новый behavioral PASS**. Исходный JSON не менялся.
+Windows-инструкция уточнена: native UTF-8 readers не передавать в PowerShell
+cmdlets; это дополнительная техническая помощь, а не факт о BSP или
+подсказка ответа. Полная матрица после изменения runner требует нового отчёта.
+
+На предыдущем checkpoint unit suite: 81 PASS. Независимая классификация десяти остальных
+единичных failures:
+
+- Реальное упущение `lock-form-fields`: не показан требуемый клиентский
+  вызов разрешения редактирования.
+- Реальная подмена задачи `mcd-check-public-boundary`: проверка подписи
+  вместо проверки доверенности в реестре.
+- Правильный ответ без активации/reference в `multilang-hook` и
+  `dedup-replace-links-public-boundary`; это behavioral debt, не scorer fix.
+- Правильный BSL скрыт в scheduled-job, backup, bp-redirect и contact-info;
+  `known_module_calls=[]` при наличии фактических публичных вызовов.
+- В print-object-registration второй правильный manager-block не
+  засчитан; в connected-command корректная фраза «БСП … вызывает его» /
+  «Напрямую вызывать … нельзя» не распознана текстовым шаблоном.
+
+Повторный диагностический пересчёт этих шести ответов после текущего
+SMS/delete fix всё ещё FAIL: устранение первой ошибки не закрывает остальные
+формы контекста. Требуются отдельные минимальные RED-регрессии; критерии
+реальных упущений сохраняются. Независимое ревью нового scorer обнаружило противоречивую рекомендацию того же API:
+положительная clause могла отменить явное «использовать не следует».
+Регрессия воспроизведена в обеих позициях fence и порядке clauses; исправление
+сохраняет запрет, если отрицательная clause называет фактический вызов,
+включая прежнюю clause вводного абзаца. Все четыре контрпримера отклоняются,
+шесть правильных SMS/delete ответов по-прежнему проходят offline-проверку.
+Контрольное ревью обнаружило вторую границу: исключение для реализации
+хука отменяло запрет фактического вызова внутри её тела. Четыре вложенных
+контрпримера добавлены до исправления (три были false PASS); исключение
+теперь действует только когда отрицательная clause не относится к вызову
+внутри тела. Unit suite и offline-проверка шести правильных ответов проходят.
+Изменения не закоммичены; неассистированный transport не проверен.
+
+## Candidate — этап 3 после независимых ревью
+
+- Переписана классификация отрицательных примеров: нужны явная метка,
+  запрет фактического вызова или относящееся к fence отрицательное пояснение.
+  Инцидентные замечания о параметрах, другом примере или клиент-серверном
+  варианте не скрывают правильный код. Положительный witness и hook exemption
+  удалены; обе опасные границы защищены тестами.
+- Все 24 сохранённых ответа восьми ранее ложно проваленных API-сценариев
+  проходят диагностический пересчёт. Старый full JSON не менялся; это не
+  свежий behavioral результат.
+- Multilang green3 в старом полном отчёте **реально прочитал** skill/reference
+  через `p=Path(...); print(p.read_text())` и вывод диапазона `t[i]`.
+  Ошибочное read-evidence исправлено ограниченным AST-анализом. Вывод пути,
+  числа, известного пустого чтения, изменённой фабрики, условного результата
+  или перенаправленного print не считается evidence. Dedup без чтения
+  остаётся настоящим activation failure.
+- Исправлен факт forms-validation: БСП создаёт команду/кнопку и назначает
+  имя действия, но обработчик добавляется прикладным кодом. Подтверждение:
+  глава 3 BSP311 раздел подключения запрета редактирования и CF служебная
+  `ПодготовитьФорму`. Проверка МЧД в реестре выделена отдельно от проверки
+  подписи по МЧД. Уточнены update/fundamentals и router.
+- Свежий `.tmp/consumer-release-candidate-targeted-3x.json`: 5/6 majority,
+  16/18 individual, activation/reference 6/6, ошибок API/кодировки 0.
+  Все пять сценариев кроме fundamentals проходят каждый повтор.
+- Дополнительный `.tmp/consumer-release-candidate-fundamentals-3x.json`
+  после уточнения полных имён: 1/3 native, gate FAIL. Ответ «имя ... неверно»
+  был ложно отклонён шаблоном отсутствующего модуля; эквивалентная диагностика
+  теперь принимается, а реальный пропуск имени базового модуля остаётся FAIL.
+  Не маскировать offline 2/3 как новый прогон.
+- Финальные static checks: 84 unit PASS, coverage 662/662, 24 references,
+  semantic 0 ERROR / 0 WARN, dry-run и diff-check PASS. Независимые ревью
+  references и scorer пройдены; review findings воспроизведены RED-тестами.
+- `.tmp/release-candidate-v0.13/`: ZIP/tar.gz по 29 файлов (skills/bsp +
+  установщики), hashes/побайтовое сравнение, install/update обоих установщиков
+  в локальные каталоги PASS. Manifest помечен candidate, не release-ready.
+- Новый полный `.tmp/consumer-release-candidate-full-3x.json` выполняется
+  без изменения runner/corpus/skill во время запуска. Следом требуется
+  отдельный non-resumable guidance-free installed-archive diagnostic;
+  helper `.tmp/run_guidance_free_probe.py` записывает удалённые cfg keys,
+  команды и собственный fingerprint, не объединяет метрики с RED/GREEN.
+- Всё остаётся локальным: нет tag, push или публикации, vendor нетронут.
 
 ## Next — закрыть behavioral debt в v0.13
 

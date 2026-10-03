@@ -51,7 +51,9 @@ REPORT_SCHEMA_VERSION = 4
 SKILL_CACHE_PATTERNS = ("__pycache__", "*.pyc", "*.pyo")
 WINDOWS_READING_INSTRUCTIONS = (
     "Text files are UTF-8. On Windows, read them using rg -n . -- PATH "
-    "(filter numbered lines for a range) or Python with encoding='utf-8'. "
+    "or Python with encoding='utf-8'. Filter with native rg patterns, rg context "
+    "options, or Python. Do not pipe native readers through PowerShell cmdlets "
+    "such as Select-String, Select-Object, or Where-Object: they re-encode stdout. "
     "Use these UTF-8 native readers instead of PowerShell Get-Content: its "
     "OEM-encoded stdout is decoded as UTF-8 by the tool and corrupts Cyrillic."
 )
@@ -60,10 +62,11 @@ SERVICE_REGIONS = frozenset({
     "СлужебныеПроцедурыИФункции",
     "УстаревшиеПроцедурыИФункции",
 })
-CALL_RE = re.compile(
+MEMBER_REFERENCE_RE = re.compile(
     r"(?<![\w.])(?P<module>[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё0-9_]*)\s*\.\s*"
-    r"(?P<method>[A-Za-zА-Яа-яЁё_][A-Za-zА-Яа-яЁё0-9_]*)\s*\("
+    r"(?P<method>[A-Za-zА-Яа-яЁё_][A-Za-zА-Яа-яЁё0-9_]*)"
 )
+CALL_RE = re.compile(MEMBER_REFERENCE_RE.pattern + r"\s*\(")
 MEMBER_ACCESS_RE = re.compile(
     r"(?<=[A-Za-zА-Яа-яЁё0-9_])\s*\.\s*(?=[A-Za-zА-Яа-яЁё_])"
 )
@@ -413,40 +416,193 @@ def search_reader_targets(arguments: list[str]) -> list[str]:
 
 
 def python_reader_targets(arguments: list[str]) -> list[str]:
-    """Recognize literal open/Path reads printed by common Python -c snippets."""
+    """Infer literal file reads whose text reaches a top-level print expression."""
     try:
         code = arguments[arguments.index("-c") + 1]
         module = ast.parse(code)
     except (ValueError, IndexError, SyntaxError):
         return []
-    targets = []
-    conditional = (ast.Lambda, ast.IfExp, ast.BoolOp, ast.GeneratorExp,
-                   ast.ListComp, ast.SetComp, ast.DictComp)
+
+    # Values are deliberately small abstract states; unknown syntax never adds evidence.
+    env: dict[str, tuple] = {}
+    targets: list[str] = []
+    factories = {"Path": True, "open": True, "print": True}
+
+    def evaluate(node: ast.AST, scope: dict[str, tuple] | None = None) -> tuple | None:
+        names = env if scope is None else scope
+        if isinstance(node, ast.Constant):
+            return ("const", node.value)
+        if isinstance(node, ast.Name):
+            return names.get(node.id)
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "Path" and factories["Path"] and node.args:
+                value = evaluate(node.args[0], names)
+                return ("path", frozenset({value[1]})) if value and value[0] == "const" and isinstance(value[1], str) else None
+            if isinstance(func, ast.Name) and func.id == "open" and factories["open"] and node.args:
+                value = evaluate(node.args[0], names)
+                return ("file", frozenset({value[1]})) if value and value[0] == "const" and isinstance(value[1], str) else None
+            if isinstance(func, ast.Attribute):
+                source = evaluate(func.value, names)
+                if source is None:
+                    return None
+                if func.attr == "read_text" and source[0] == "path":
+                    return ("text", source[1])
+                if func.attr == "read" and source[0] == "file":
+                    if node.keywords or len(node.args) > 1:
+                        return None
+                    if node.args:
+                        size = evaluate(node.args[0], names)
+                        if not size or size[0] not in {"const", "number"} or not isinstance(size[1], int) or size[1] == 0:
+                            return None
+                    return ("text", source[1])
+                if func.attr == "splitlines" and source[0] == "text":
+                    return ("lines", source[1])
+            if isinstance(func, ast.Attribute) and func.attr == "join":
+                source = evaluate(func.value, names)
+                if source and source[0] == "const" and isinstance(source[1], str) and len(node.args) == 1:
+                    joined = evaluate(node.args[0], names)
+                    return ("text", joined[1]) if joined and joined[0] == "itertext" else None
+            return None
+        if isinstance(node, ast.Subscript):
+            source = evaluate(node.value, names)
+            if source and source[0] == "text":
+                if isinstance(node.slice, ast.Slice):
+                    parts = [evaluate(part, names) for part in (node.slice.lower, node.slice.upper, node.slice.step) if part is not None]
+                    if not all(part and part[0] in {"const", "number"} and isinstance(part[1], int) for part in parts):
+                        return None
+                    bounds = [evaluate(part, names) if part is not None else None for part in (node.slice.lower, node.slice.upper, node.slice.step)]
+                    start = bounds[0][1] if bounds[0] else 0
+                    stop = bounds[1][1] if bounds[1] else None
+                    step = bounds[2][1] if bounds[2] else 1
+                    if start < 0 or (stop is not None and stop < 0) or step <= 0:
+                        return None
+                    if stop is not None and stop <= start:
+                        return None
+                return source
+            if source and source[0] == "lines":
+                index = node.slice
+                if isinstance(index, ast.Slice):
+                    parts = [evaluate(part, names) for part in (index.lower, index.upper, index.step) if part is not None]
+                    valid = all(part and part[0] in {"const", "number"} and isinstance(part[1], int) for part in parts)
+                    if valid:
+                        bounds = [evaluate(part, names) if part is not None else None for part in (index.lower, index.upper, index.step)]
+                        start = bounds[0][1] if bounds[0] else 0
+                        stop = bounds[1][1] if bounds[1] else None
+                        step = bounds[2][1] if bounds[2] else 1
+                        valid = start >= 0 and (stop is None or stop >= 0) and step > 0
+                        if valid and stop is not None and stop <= start:
+                            return None
+                else:
+                    part = evaluate(index, names)
+                    valid = bool(part and part[0] in {"const", "number"} and isinstance(part[1], int))
+                return ("text", source[1]) if valid else None
+            return None
+        if isinstance(node, ast.JoinedStr):
+            paths = set()
+            for part in node.values:
+                value = evaluate(part.value, names) if isinstance(part, ast.FormattedValue) else evaluate(part, names)
+                if value and value[0] in {"text", "lines"}:
+                    paths.update(value[1])
+            return ("text", frozenset(paths)) if paths else ("const", "")
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub)):
+            left, right = evaluate(node.left, names), evaluate(node.right, names)
+            if left and right and left[0] in {"const", "number"} and right[0] in {"const", "number"}:
+                try:
+                    value = left[1] + right[1] if isinstance(node.op, ast.Add) else left[1] - right[1]
+                    return ("number", value) if isinstance(value, (int, float)) else None
+                except TypeError:
+                    return None
+            return None
+        if isinstance(node, ast.GeneratorExp) and len(node.generators) == 1:
+            clause = node.generators[0]
+            if clause.ifs:
+                return None
+            iterable = clause.iter
+            values: list[tuple] = []
+            if isinstance(iterable, ast.Call) and isinstance(iterable.func, ast.Name) and iterable.func.id == "range":
+                if not isinstance(clause.target, ast.Name):
+                    return None
+                bounds = [evaluate(arg, names) for arg in iterable.args]
+                if not 1 <= len(bounds) <= 3 or any(not b or b[0] not in {"const", "number"} or not isinstance(b[1], int) for b in bounds):
+                    return None
+                try:
+                    sequence = range(*(b[1] for b in bounds))
+                    if len(sequence) > 10000:
+                        return None
+                except (ValueError, OverflowError):
+                    return None
+                for item in sequence:
+                    local = dict(names)
+                    local[clause.target.id] = ("number", item)
+                    value = evaluate(node.elt, local)
+                    if value is None:
+                        return None
+                    values.append(value)
+            elif isinstance(iterable, ast.Call) and isinstance(iterable.func, ast.Name) and iterable.func.id == "enumerate" and iterable.args:
+                source = evaluate(iterable.args[0], names)
+                if not source or source[0] != "lines":
+                    return None
+                # Enumerated lines are represented symbolically; only line values carry provenance.
+                target = clause.target
+                if not isinstance(target, (ast.Tuple, ast.List)) or len(target.elts) != 2 or not all(isinstance(x, ast.Name) for x in target.elts):
+                    return None
+                local = dict(names)
+                local[target.elts[0].id] = ("number", 0)
+                local[target.elts[1].id] = ("text", source[1])
+                value = evaluate(node.elt, local)
+                if value is None:
+                    return None
+                values.append(value)
+            else:
+                return None
+            paths = set().union(*(value[1] for value in values if value[0] in {"text", "lines"})) if values else set()
+            return ("itertext", frozenset(paths)) if paths else None
+        return None
+
     for statement in module.body:
-        if not isinstance(statement, ast.Expr):
-            continue
-        expression = statement.value
-        if not (isinstance(expression, ast.Call) and isinstance(expression.func, ast.Name)
-                and expression.func.id == "print"):
-            continue
-        if any(isinstance(node, conditional) for node in ast.walk(expression)):
-            continue
-        for node in ast.walk(expression):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-                continue
-            source = node.func.value
-            if not isinstance(source, ast.Call) or not source.args:
-                continue
-            factory = source.func
-            factory_name = factory.id if isinstance(factory, ast.Name) else (
-                factory.attr if isinstance(factory, ast.Attribute) else ""
-            )
-            if (factory_name, node.func.attr) not in {("open", "read"), ("Path", "read_text")}:
-                continue
-            filename = source.args[0]
-            if isinstance(filename, ast.Constant) and isinstance(filename.value, str):
-                targets.append(filename.value)
-    return targets
+        if isinstance(statement, (ast.Import, ast.ImportFrom)):
+            for alias in statement.names:
+                if alias.name == "*":
+                    return []
+                bound = alias.asname or (alias.name if isinstance(statement, ast.ImportFrom)
+                                         else alias.name.split(".", 1)[0])
+                env.pop(bound, None)
+                if bound in factories:
+                    factories[bound] = bool(
+                        isinstance(statement, ast.ImportFrom)
+                        and alias.name == bound
+                        and ((statement.module == "pathlib" and bound == "Path")
+                             or (statement.module == "builtins" and bound in {"open", "print"}))
+                    )
+        elif isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            if isinstance(statement, ast.AnnAssign) and statement.value is None:
+                return []
+            value = evaluate(statement.value) if statement.value is not None else None
+            targets_to_bind = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            if not all(isinstance(target, ast.Name) for target in targets_to_bind):
+                return []
+            for target in targets_to_bind:
+                if target.id in factories:
+                    factories[target.id] = False
+                if value is None:
+                    env.pop(target.id, None)
+                else:
+                    env[target.id] = value
+        elif isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call):
+            call = statement.value
+            if isinstance(call.func, ast.Name) and call.func.id == "print" and factories["print"]:
+                if any(keyword.arg in {None, "file"} for keyword in call.keywords):
+                    return []
+                for argument in call.args:
+                    value = evaluate(argument)
+                    if value and value[0] in {"text", "lines"}:
+                        targets.extend(value[1])
+            else:
+                return []
+        else:
+            return []
+    return list(dict.fromkeys(targets))
 
 
 def skill_activation_evidence(
@@ -597,20 +753,49 @@ def bsl_blocks(response: str) -> list[str]:
     return []
 
 
-def warning_targets_other_calls(context: str, code_syntax: str) -> bool:
-    context_calls = {
+def warning_targets_same_call(context: str, code_syntax: str) -> bool:
+    code_calls = {
         (call.group("module").lower(), call.group("method").lower())
-        for call in CALL_RE.finditer(normalize_member_access(context))
+        for call in CALL_RE.finditer(code_syntax)
     }
-    if context_calls:
-        code_calls = {
-            (call.group("module").lower(), call.group("method").lower())
-            for call in CALL_RE.finditer(code_syntax)
+    for clause in re.split(r"(?<=[.!?;:])\s+", context):
+        if not NEGATIVE_BLOCK_RE.search(clause):
+            continue
+        references = {
+            (reference.group("module").lower(), reference.group("method").lower())
+            for reference in MEMBER_REFERENCE_RE.finditer(clause)
         }
-        return code_calls.isdisjoint(context_calls)
-    context_names = set(re.findall(r"\b(\w+)\s*\(", context.lower()))
-    code_names = set(re.findall(r"\b(\w+)\s*\(", code_syntax.lower()))
-    return bool(context_names) and code_names.isdisjoint(context_names)
+        if code_calls.intersection(references):
+            return True
+        # An unqualified warning such as "Метод() не следует вызывать"
+        # also targets a call, but never collapse different qualified modules.
+        if not references:
+            names = set(re.findall(r"\b(\w+)\s*\(", clause.lower()))
+            if names.intersection(method for _, method in code_calls):
+                return True
+    return False
+
+
+def negative_example_context(context: str, code_syntax: str) -> bool:
+    """Require evidence that a warning labels this snippet, not other advice."""
+    if re.search(
+        r"(?:ложн\w*|ошибочн\w*|неправильн\w*|неверн\w*)\s+"
+        r"(?:очевидн\w*\s+)?(?:пример|код|вариант|вызов|API|реализац|сигнатур)\w*|"
+        r"(?:пример|код|вариант|вызов)\w*\s+(?:неверн|ошибочн|неправильн)\w*|"
+        r"(?:неверно|ошибочно|неправильно)\s*:\s*$|антипаттерн|нельзя\s+так|"
+        r"\bтак\b[^.\n]{0,40}\bнельзя\b", context, re.I
+    ):
+        return True
+    if warning_targets_same_call(context, code_syntax):
+        return True
+    # Unnamed negative examples still occur: "вызова вида ... нет",
+    # "таких публичных методов нет", or "этот метод не запускает операцию".
+    return bool(NEGATIVE_BLOCK_RE.search(context) and re.search(
+        r"вызова?\s+вида|\bв\s+частности\b|\bнапример\b|"
+        r"\bтаких\s+(?:публичных\s+)?(?:методов|вызовов)\b|"
+        r"\bэтот\s+(?:метод|вызов|код|пример)\b|"
+        r"быть\s+не\s+долж", context, re.I
+    ))
 
 
 def executable_bsl_blocks(response: str) -> list[str]:
@@ -623,6 +808,7 @@ def executable_bsl_blocks(response: str) -> list[str]:
         previous_end = matches[index - 1].end() if index else 0
         prefix = response[max(previous_end, match.start() - 240):match.start()]
         immediate_prefix = re.split(r"\n\s*\n", prefix.rstrip())[-1]
+        prefix_paragraph = immediate_prefix
         sentences = re.split(r"(?<=[.!?])\s+", immediate_prefix)
         # A correction can contain "the advice is wrong" before the actual
         # recommendation. Use its nearest sentence, except connecting labels.
@@ -632,57 +818,24 @@ def executable_bsl_blocks(response: str) -> list[str]:
         suffix = response[match.end():min(next_start, match.end() + 320)]
         immediate_suffix = re.split(r"\n\s*\n", suffix.lstrip())[0]
         code = match.group("code")
-        first_lines = "\n".join(code.splitlines()[:3])
-        is_procedure_implementation = bool(re.search(
-            r"(?m)^\s*(?:Процедура|Функция)\s+\w+",
-            re.sub(r"(?m)^\s*//[^\n]*(?:\n|$)", "", code).lstrip(),
-            re.I,
-        ))
-        suffix_negative = bool(NEGATIVE_BLOCK_RE.search(immediate_suffix))
+        first_comments = "\n".join(
+            line for line in code.splitlines()[:3] if line.lstrip().startswith("//")
+        )
+        code_syntax = bsl_code_views(code)[1]
+        suffix_negative = negative_example_context(immediate_suffix, code_syntax)
         if (index + 1 < len(matches) and immediate_suffix.rstrip().endswith(":")
                 and immediate_suffix.strip() in response[match.end():matches[index + 1].start()]):
             # A heading introducing the next fence does not label this one.
             suffix_negative = False
-        code_syntax = bsl_code_views(code)[1]
-        explicit_suffix_label = bool(re.search(
-            r"ложн|ошибоч|неправиль|неверн|антипаттерн|нельзя\s+так",
-            immediate_suffix, re.I,
-        ))
-        # A warning against another API after a correct fence is not a label
-        # saying that this fence is an incorrect example. Keep validating it.
-        if warning_targets_other_calls(immediate_suffix, code_syntax) and not explicit_suffix_label:
-            suffix_negative = False
-        prefix_negative = bool(NEGATIVE_BLOCK_RE.search(immediate_prefix))
-        if warning_targets_other_calls(immediate_prefix, code_syntax) and not re.search(
-            r"ложн|ошибоч|неправиль|неверн|антипаттерн|нельзя\s+так", immediate_prefix, re.I
-        ):
-            prefix_negative = False
-        negative_context = bool(
-            prefix_negative or suffix_negative or NEGATIVE_BLOCK_RE.search(first_lines)
+        prefix_negative = (
+            warning_targets_same_call(prefix_paragraph, code_syntax)
+            or negative_example_context(immediate_prefix, code_syntax)
         )
-        # Saying that a hook must not be called can immediately precede the
-        # correct procedure that implements it. A declaration is not itself
-        # the prohibited call; explicit bad-example labels still win.
-        surrounding_context = f"{immediate_prefix}\n{first_lines}\n{immediate_suffix}"
-        direct_call_warning = bool(re.search(
-            r"не\s+(?:следует|нужно|надо)\s+вызывать|не\s+вызывайте|"
-            r"вызывать[\s\S]{0,100}не\s+нужно|"
-            r"напрямую[^.\n;]{0,40}не\s+вызыва|напрямую\s+вызывать\s+нельзя",
-            surrounding_context,
-            re.I,
-        ))
-        explicit_bad_example = bool(re.search(
-            r"ложн|ошибоч|неправиль|неверн|антипаттерн|нельзя\s+так",
-            surrounding_context,
-            re.I,
-        ))
+        # A hook declaration is not a direct call. No implementation exemption
+        # is needed: matching is against actual qualified calls in its body.
         negative.append(
-            negative_context
-            and not (
-                is_procedure_implementation
-                and direct_call_warning
-                and not explicit_bad_example
-            )
+            prefix_negative or suffix_negative
+            or negative_example_context(first_comments, code_syntax)
         )
 
     # Propagate negative context across adjacent alternatives such as

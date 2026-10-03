@@ -317,6 +317,52 @@ class JsonlTests(unittest.TestCase):
         events[0]["item"]["command"] = f'python -c "print(\'{path}\')"'
         self.assertEqual(runner.skill_activation_evidence(events, "bsp", "prefixes.md"), [])
 
+    def test_python_path_text_and_selected_lines_are_observable(self):
+        path = r".agents/skills/bsp/references/multilang hook.md"
+        windows_path = r".agents\skills\bsp\references\multilang hook.md"
+        code = f"from pathlib import Path; p=Path({windows_path!r}); print(p.read_text())"
+        self.assertEqual(runner.python_reader_targets(["python", "-c", code]), [windows_path])
+        programs = (
+            "from pathlib import Path; p=Path(" + repr(path) + "); print(p.read_text(encoding='utf-8'))",
+            "from pathlib import Path; p=Path(" + repr(path) + "); t=p.read_text(encoding='utf-8').splitlines(); print('\\n'.join(f'{i+1}: {t[i]}' for i in range(346, 380)))",
+            "from pathlib import Path; p=Path(" + repr(path) + "); t=p.read_text(encoding='utf-8').splitlines(); print('\\n'.join(f'{i}: {line}' for i, line in enumerate(t)))",
+            "from pathlib import Path; p=Path(" + repr(path) + "); t=p.read_text(encoding='utf-8').splitlines(); print(t[346:380])",
+        )
+        for program in programs:
+            with self.subTest(program=program):
+                events = [{"type": "item.completed", "item": {
+                    "type": "command_execution", "exit_code": 0,
+                    "command": f'python -c "{program}"', "aggregated_output": "actual file content",
+                }}]
+                self.assertEqual(len(runner.skill_activation_evidence(events, "bsp", "multilang hook.md")), 1)
+
+    def test_python_reader_rejects_non_observable_or_conditional_reads(self):
+        path = ".agents/skills/bsp/references/prefixes.md"
+        programs = (
+            f"from pathlib import Path; p=Path('{path}'); print(p)",
+            f"from pathlib import Path; p=Path('{path}'); t=p.read_text(); print('filename')",
+            f"from pathlib import Path; p=Path('{path}'); t=p.read_text(); t='literal'; print(t)",
+            f"open = lambda name: type('F', (), {{'read': lambda self: 'fake'}})(); t = open('{path}').read(); print(t)",
+            f"from pathlib import Path; p=Path('{path}'); print(p.read_text(), file=open('/tmp/out','w'))",
+            f"print = lambda value: None; print(open('{path}').read())",
+            f"from pathlib import Path; p=Path('{path}'); print(p.read_text() if False else 'no')",
+            f"from pathlib import Path; p=Path('{path}'); print(p.read_text() and 'no')",
+            f"from pathlib import Path; p=Path('{path}'); t=p.read_text().splitlines(); print('\\n'.join(x for x in t if False))",
+            f"from pathlib import Path; p=Path('{path}'); t=p.read_text()\nif True: t='not file'\nprint(t)",
+            f"from pathlib import Path; t=open('{path}').read(0); print('noise'); print(t)",
+            f"from pathlib import Path; p=Path('{path}'); t=p.read_text().splitlines(); print('\\n'.join(t[i] for i in range(0, 999999999999999999999999999999999999999999)))",
+            f"from pathlib import Path; p=Path('{path}'); t=p.read_text(); print('noise'); print(t[:0])",
+            f"Path = lambda name: None; print(Path('{path}').read_text())",
+            f"def Path(name): return None\nprint(Path('{path}').read_text())",
+        )
+        for program in programs:
+            with self.subTest(program=program):
+                events = [{"type": "item.completed", "item": {
+                    "type": "command_execution", "exit_code": 0,
+                    "command": f'python -c "{program}"', "aggregated_output": "actual file content",
+                }}]
+                self.assertEqual(runner.skill_activation_evidence(events, "bsp", "prefixes.md"), [])
+
     def test_correct_answer_alone_is_not_activation(self):
         events = [{
             "type": "item.completed",
@@ -360,7 +406,10 @@ class CdxCommandTests(unittest.TestCase):
         self.assertIn("allow_login_shell=false", command)
         self.assertIn('shell_environment_policy.set.PYTHONIOENCODING="utf-8"', command)
         instructions = next(arg for arg in command if arg.startswith("developer_instructions="))
-        self.assertIn("rg -n", json.loads(instructions.split("=", 1)[1]))
+        reading_instructions = json.loads(instructions.split("=", 1)[1])
+        self.assertIn("rg -n", reading_instructions)
+        self.assertIn("Do not pipe", reading_instructions)
+        self.assertIn("Select-String", reading_instructions)
         self.assertEqual(command[-1], self.case.task)
 
     def test_luna_is_the_default_eval_model(self):
@@ -403,6 +452,80 @@ class ResponseScoringTests(unittest.TestCase):
         score = runner.score_response(self.case, unsafe, self.method_index)
         self.assertFalse(score["passed"])
         self.assertEqual(score["invalid_methods"], ["ТестовыйМодуль.Опечатка"])
+
+    def test_positive_clause_does_not_override_warning_about_the_same_call(self):
+        warning = "ТестовыйМодуль.СтабильныйМетод использовать не следует."
+        recommendation = "Для прикладного кода предназначен ТестовыйМодуль.СтабильныйМетод."
+        block = "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```"
+        for context in (warning + " " + recommendation, recommendation + " " + warning):
+            for response in (context + "\n\n" + block, block + "\n\n" + context):
+                with self.subTest(response=response):
+                    score = runner.score_response(self.case, response, self.method_index)
+                    self.assertFalse(score["passed"])
+                    self.assertEqual(runner.executable_bsl_blocks(response), [])
+
+    def test_hook_exemption_does_not_hide_warning_about_a_call_in_its_body(self):
+        warning = "ТестовыйМодуль.СтабильныйМетод напрямую вызывать нельзя."
+        recommendation = "Для прикладного кода предназначен ТестовыйМодуль.СтабильныйМетод."
+        block = (
+            "```bsl\nПроцедура ПриОпределенииНастроек(Настройки) Экспорт\n"
+            "    ТестовыйМодуль.СтабильныйМетод();\nКонецПроцедуры\n```"
+        )
+        for context in (warning + " " + recommendation, recommendation + " " + warning):
+            for response in (context + "\n\n" + block, block + "\n\n" + context):
+                with self.subTest(response=response):
+                    self.assertFalse(runner.score_response(self.case, response, self.method_index)["passed"])
+                    self.assertEqual(runner.executable_bsl_blocks(response), [])
+
+    def test_warning_without_parentheses_does_not_hide_public_recommendation(self):
+        examples = (
+            (
+                "Прикладной код должен вызывать стабильный API ТестовыйМодуль.СтабильныйМетод; "
+                "передавать логин и пароль в хук напрямую не нужно.\n\n",
+                "",
+            ),
+            (
+                "Правильный вызов:\n",
+                "\n\nВызов ТестовыйМодуль.ДругойМетод использовать не следует. "
+                "Для прикладного кода предназначен ТестовыйМодуль.СтабильныйМетод.",
+            ),
+            (
+                "Логин и пароль отдельно передавать не нужно: используйте публичный API "
+                "ТестовыйМодуль.СтабильныйМетод.\n\n",
+                "",
+            ),
+            (
+                "",
+                "\n\nПрямой вызов ТестовыйМодуль.ДругойМетод не подходит. "
+                "Используйте экспортный метод общего модуля ТестовыйМодуль из публичного интерфейса.",
+            ),
+        )
+        for prefix, suffix in examples:
+            with self.subTest(prefix=prefix, suffix=suffix):
+                response = prefix + "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```" + suffix
+                score = runner.score_response(self.case, response, self.method_index)
+                self.assertTrue(score["passed"])
+                self.assertEqual(score["known_module_calls"], ["ТестовыйМодуль.СтабильныйМетод"])
+                unsafe = response.replace("СтабильныйМетод();", "СтабильныйМетод();\nТестовыйМодуль.Опечатка();")
+                self.assertFalse(runner.score_response(self.case, unsafe, self.method_index)["passed"])
+
+    def test_incidental_negative_notes_do_not_label_recommended_code(self):
+        contexts = (
+            ("В reference отдельного конструктора параметров нет.\n\n", ""),
+            ("", "\n\nМодуль без суффикса Сервер использовать не следует."),
+            ("", "\n\nВ клиент-серверном варианте штатная форма не подходит."),
+            ("", "\n\nПроверка не гарантирует, что состояние задачи не изменится."),
+            ("", "\n\nМетод возвращает строку, отдельно форматировать её не нужно."),
+            ("", "\n\nТаблица уже создана БСП; создавать коллекцию в менеджере не нужно."),
+            ("", "\n\nПроверка на другом примере дала неверный результат."),
+        )
+        for prefix, suffix in contexts:
+            with self.subTest(prefix=prefix, suffix=suffix):
+                response = prefix + "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```" + suffix
+                score = runner.score_response(self.case, response, self.method_index)
+                self.assertTrue(score["passed"])
+                unsafe = response.replace("СтабильныйМетод();", "СтабильныйМетод();\nТестовыйМодуль.Опечатка();")
+                self.assertFalse(runner.score_response(self.case, unsafe, self.method_index)["passed"])
 
     def test_unqualified_warning_does_not_hide_invalid_call_in_another_fence(self):
         response = (
@@ -817,7 +940,12 @@ class CorpusCriteriaTests(unittest.TestCase):
     ПодключаемыеКоманды.ДобавитьУсловиеВидимостиКоманды(Команда, "Проведен", Истина);
 КонецПроцедуры
 ```'''
-        for warning in ("Сам хук напрямую вызывать нельзя.", "Хук вызывает сама БСП."):
+        for warning in (
+            "Сам хук напрямую вызывать нельзя.", "Хук вызывает сама БСП.",
+            "Хук реализуется приложением, а вызывает его БСП. Напрямую вызывать хук нельзя.",
+            "Напрямую вызывать ПодключаемыеКомандыПереопределяемый."
+            "ПриОпределенииКомандПодключенныхКОбъекту нельзя.",
+        ):
             self.assertTrue(runner.score_response(case, frame + "\n\n" + warning, {})["passed"])
         self.assertFalse(runner.score_response(case, frame, {})["passed"])
         for broken in (
@@ -843,6 +971,14 @@ class CorpusCriteriaTests(unittest.TestCase):
 УстаревшиеПроцедурыИФункции — устаревший.
 Для служебных методов обратная совместимость не гарантируется.'''
         self.assertTrue(runner.score_response(case, response, {})["passed"])
+        natural_correction = response.replace(
+            "ОбщегоНазначенияСлужебный не существует",
+            "Имя ОбщегоНазначенияСлужебный для этого семейства неверно",
+        )
+        self.assertTrue(runner.score_response(case, natural_correction, {})["passed"])
+        wrong_module = response.replace("ОбщегоНазначенияСлужебный не существует",
+                                        "ОбщегоНазначенияСлужебный — реальный серверный модуль")
+        self.assertFalse(runner.score_response(case, wrong_module, {})["passed"])
         wrong_context = response.replace("серверный общий модуль с разрешённым вызовом с клиента",
                                          "клиентский модуль, который делает серверный вызов")
         self.assertFalse(runner.score_response(case, wrong_context, {})["passed"])

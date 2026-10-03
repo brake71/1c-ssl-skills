@@ -78,8 +78,17 @@ Remove-Item Env:SKILLS_AGENT
 ### Из релиза или клона
 
 GitHub Release содержит архивы `bsp-skill-vX.Y.zip` и
-`bsp-skill-vX.Y.tar.gz`. Внутри находится `skills/bsp`, который можно вручную
-скопировать в каталог скилов агента.
+`bsp-skill-vX.Y.tar.gz`. Внутри — `skills/bsp/`, `install.sh` и `install.ps1`.
+Каталог `skills/bsp` можно вручную скопировать в каталог скилов агента;
+установщики поддерживают локальный источник без обращения к сети:
+
+```bash
+bash install.sh --source . --agent codex
+```
+
+```powershell
+.\install.ps1 -SourceDirectory . -Agent Codex
+```
 
 Из клона:
 
