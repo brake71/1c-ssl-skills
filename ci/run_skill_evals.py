@@ -80,7 +80,8 @@ BSL_FENCE_RE = re.compile(r"```(?:bsl|1c)?\s*\n(?P<code>.*?)```", re.I | re.S)
 NEGATIVE_BLOCK_RE = re.compile(
     r"(?:не\s+(?:следует|вызыва|существ|нужно|запуска|команд|долж|явля|подход)|"
     r"(?:публичн|метод|модул|вызов)[^.\n]{0,120}\bнет\b|нельзя|"
-    r"неправиль|ошибочн|невер|ложн|"
+    r"\b(?:неправильн|ошибочн|неверн|ложн)"
+    r"(?:ый|ая|ое|ые|ого|ому|ым|ом|ой|ую|ых|ыми|о|а|ы)\b|\bневерен\b|"
     r"антипаттерн|запрещ(?:[её]н\w*|\w*\s+вызыв\w*))",
     re.I,
 )
@@ -110,6 +111,14 @@ class EvalCase:
     required_code_patterns: tuple[str, ...] = ()
     required_code_block_patterns: tuple[str, ...] = ()
     forbidden_code_patterns: tuple[str, ...] = ()
+    error_handling_rule: ErrorHandlingRule | None = None
+
+
+@dataclass(frozen=True)
+class ErrorHandlingRule:
+    value: str
+    source_call: str
+    normal_values: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -149,6 +158,21 @@ def load_cases(path: Path) -> list[EvalCase]:
         forbidden_code = _pattern_tuple(
             raw, "forbidden_code_patterns", case_id, required=False
         )
+        rule_raw = raw.get("error_handling_rule")
+        error_rule = None
+        if rule_raw is not None:
+            if (not isinstance(rule_raw, dict)
+                    or not isinstance(rule_raw.get("value"), str)
+                    or not re.fullmatch(r"[\wА-Яа-яЁё]+(?:\.[\wА-Яа-яЁё]+)+", rule_raw["value"])
+                    or not isinstance(rule_raw.get("source_call"), str)
+                    or not re.fullmatch(r"[\wА-Яа-яЁё]+(?:\.[\wА-Яа-яЁё]+)+", rule_raw["source_call"])
+                    or set(rule_raw) != {"value", "source_call", "normal_values"}
+                    or not isinstance(rule_raw.get("normal_values"), list)
+                    or not 1 <= len(rule_raw["normal_values"]) <= 16
+                    or "" not in rule_raw["normal_values"]
+                    or not all(isinstance(v, str) for v in rule_raw["normal_values"])):
+                raise EvalError(f"Case {case_id} has invalid error_handling_rule")
+            error_rule = ErrorHandlingRule(rule_raw["value"], rule_raw["source_call"], tuple(rule_raw["normal_values"]))
         for pattern in (
             required + forbidden + activation + required_code + required_code_blocks
             + forbidden_code
@@ -172,6 +196,7 @@ def load_cases(path: Path) -> list[EvalCase]:
             required_code_patterns=required_code,
             required_code_block_patterns=required_code_blocks,
             forbidden_code_patterns=forbidden_code,
+            error_handling_rule=error_rule,
         ))
     if not result:
         raise EvalError("Eval corpus is empty")
@@ -863,6 +888,237 @@ def normalize_member_access(text: str) -> str:
     return MEMBER_ACCESS_RE.sub(".", text)
 
 
+def error_handling_rule_satisfied(blocks: list[str], rule: ErrorHandlingRule) -> bool:
+    """Interpret a bounded declarative subset of BSL error handling; never execute it."""
+    if len(blocks) > 128 or sum(map(len, blocks)) > 65536:
+        return False
+    root = rule.value.split(".", 1)[0].lower()
+    scenarios = (*rule.normal_values, "__OTHER_ERROR_STATUS__")
+
+    # AST nodes are immutable tuples: ("stmt", id, values, syntax) or
+    # ("if", ((condition, body), ...), else_body). Each fence is parsed once.
+    parsed_fences = []
+    for block in blocks:
+        values, syntax = bsl_code_views(block)
+        if len(syntax) > 65536:
+            return False
+        statements = []
+        start = 0
+        depth = 0
+        for pos, char in enumerate(syntax):
+            if char == "(":
+                depth += 1
+                if depth > 32: return False
+            elif char == ")":
+                depth -= 1
+                if depth < 0: return False
+            elif char == ";" and depth == 0:
+                statements.append((values[start:pos].strip(), syntax[start:pos].strip()))
+                start = pos + 1
+            elif char in "\r\n" and depth == 0:
+                # Newlines delimit ordinary statements; header continuation is joined below.
+                statements.append((values[start:pos].strip(), syntax[start:pos].strip()))
+                start = pos + 1
+            if len(statements) > 4096: return False
+        if depth: return False
+        if values[start:].strip(): statements.append((values[start:].strip(), syntax[start:].strip()))
+        # Join multiline parenthesized calls are already retained; join split If headers.
+        compact = []
+        for original, visible in statements:
+            if not visible: continue
+            if compact and re.match(r"^(?:И|ИЛИ|AND|OR)\b", visible.strip(), re.I) and re.match(r"^Если\b", compact[-1][1].strip(), re.I):
+                a, b = compact.pop(); compact.append((a + " " + original, b + " " + visible))
+            elif compact and re.match(r"^(?:Тогда)\b", visible.strip(), re.I) and re.match(r"^Если\b", compact[-1][1].strip(), re.I):
+                a, b = compact.pop(); compact.append((a + " " + original, b + " " + visible))
+            elif compact and re.match(r"^ВызватьИсключение\s*$", compact[-1][1].strip(), re.I):
+                a, b = compact.pop(); compact.append((a + " " + original, b + " " + visible))
+            else: compact.append((original, visible))
+        index_counter = [0]
+        def parse_sequence(i, stops=(), level=0):
+            if level > 32:
+                raise ValueError
+            nodes = []
+            while i < len(compact):
+                original, visible = compact[i]
+                key = visible.strip().split(None, 1)[0].lower() if visible.strip() else ""
+                if key in stops: return tuple(nodes), i, key
+                if re.match(r"^(?:для|пока|попытка|исключение|перейти|прервать|продолжить|возврат|процедура|функция)\b", visible, re.I):
+                    raise ValueError
+                if key == "если":
+                    branches = []
+                    cond = re.match(r"^Если\s+(.+?)\s+Тогда\s*$", original, re.I | re.S)
+                    if not cond: raise ValueError
+                    body, i, stop = parse_sequence(i + 1, ("иначеесли", "иначе", "конецесли"), level + 1)
+                    branches.append((cond.group(1), body))
+                    while stop == "иначеесли":
+                        cond = re.match(r"^ИначеЕсли\s+(.+?)\s+Тогда\s*$", compact[i][0], re.I | re.S)
+                        if not cond: raise ValueError
+                        body, i, stop = parse_sequence(i + 1, ("иначеесли", "иначе", "конецесли"), level + 1)
+                        branches.append((cond.group(1), body))
+                    else_body = ()
+                    if stop == "иначе": else_body, i, stop = parse_sequence(i + 1, ("конецесли",), level + 1)
+                    if stop != "конецесли": raise ValueError
+                    nodes.append(("if", tuple(branches), else_body)); i += 1; continue
+                if key in ("иначе", "иначеесли", "конецесли"): raise ValueError
+                index_counter[0] += 1
+                nodes.append(("stmt", index_counter[0], original, visible)); i += 1
+            return tuple(nodes), i, ""
+        try:
+            tree, end, stop = parse_sequence(0)
+            if end != len(compact) or stop: raise ValueError
+            parsed_fences.append(tree)
+        except (ValueError, RecursionError):
+            parsed_fences.append(None)
+
+    def split_expression(expr, pattern):
+        """Split only at unquoted top-level operators/argument separators."""
+        parts, start, depth, quoted, pos = [], 0, 0, False, 0
+        while pos < len(expr):
+            char = expr[pos]
+            if char == '"':
+                if quoted and pos + 1 < len(expr) and expr[pos + 1] == '"':
+                    pos += 2
+                    continue
+                quoted = not quoted
+            elif not quoted:
+                depth += (char == "(") - (char == ")")
+                if depth == 0:
+                    match = re.match(pattern, expr[pos:], re.I)
+                    if match:
+                        parts.append(expr[start:pos])
+                        pos += match.end()
+                        start = pos
+                        continue
+            pos += 1
+        parts.append(expr[start:])
+        return parts
+
+    def interpret(tree, scenario):
+        if tree is None: return None
+        env = {}
+        provenance = set()
+        bound = False
+        events = []
+        def resolve(expr):
+            expr = normalize_member_access(expr.strip())
+            lit = re.fullmatch(r'"((?:[^"]|"")*)"', expr, re.S)
+            if lit: return lit.group(1).replace('""', '"'), False
+            if expr.lower() == rule.value.lower() and bound: return scenario, True
+            if re.fullmatch(r"[A-Za-z_А-Яа-яЁё][\wА-Яа-яЁё]*", expr):
+                name = expr.lower()
+                return env.get(name), name in provenance
+            pieces = split_expression(expr, r"\+")
+            if len(pieces) > 1:
+                values = [resolve(x) for x in pieces]
+                if all(v[0] is not None for v in values): return "".join(v[0] for v in values), any(v[1] for v in values)
+            return None, False
+        ops = [0]
+        def condition(expr, level=0):
+            ops[0] += 1
+            if level > 32 or ops[0] > 128: return None
+            expr = expr.strip()
+            while expr.startswith("(") and expr.endswith(")"):
+                dep = 0; enclosed = True
+                for p,ch in enumerate(expr):
+                    dep += (ch == "(") - (ch == ")")
+                    if dep == 0 and p < len(expr)-1: enclosed = False; break
+                if not enclosed: break
+                expr = expr[1:-1].strip()
+            for pattern, is_or in ((r"\s+(?:ИЛИ|OR)\s+", True),
+                                   (r"\s+(?:И|AND)\s+", False)):
+                pieces = split_expression(expr, pattern)
+                if len(pieces) > 1:
+                    results = [condition(piece, level + 1) for piece in pieces]
+                    if any(result is None for result in results):
+                        return None
+                    return any(results) if is_or else all(results)
+            m = re.match(r"^Не\s+", expr, re.I)
+            if m:
+                v=condition(expr[m.end():],level+1); return None if v is None else not v
+            m = re.fullmatch(r"(ПустаяСтрока|ЗначениеЗаполнено)\s*\((.*)\)", expr, re.I|re.S)
+            if m:
+                val,prov=resolve(m.group(2))
+                if val is None or not prov: return None
+                return (val == "") if m.group(1).lower()=="пустаястрока" else (val != "")
+            m = re.fullmatch(r"(.+?)\s*(<>|=)\s*(.+)", expr, re.S)
+            if m:
+                a,ap=resolve(m.group(1)); b,bp=resolve(m.group(3))
+                if a is None or b is None or not (ap or bp): return None
+                return (a==b) if m.group(2)=="=" else (a!=b)
+            return None
+        def run(nodes):
+            nonlocal bound
+            for node in nodes:
+                if node[0]=="if":
+                    chosen=False
+                    for cond,body in node[1]:
+                        result=condition(cond)
+                        if result is None: return False
+                        if result:
+                            if not run(body): return False
+                            chosen=True; break
+                    if not chosen and not run(node[2]): return False
+                    continue
+                _, ident, original, visible = node
+                assign=re.match(r"^([\wА-Яа-яЁё]+(?:\.[\wА-Яа-яЁё]+)*)\s*=\s*(.+)$", original, re.S)
+                if assign:
+                    lhs,rhs=normalize_member_access(assign.group(1)),assign.group(2).strip()
+                    if lhs.lower()==root:
+                        bound=False; env.clear(); provenance.clear()
+                        call=re.match(r"^([\wА-Яа-яЁё]+(?:\.[\wА-Яа-яЁё]+)*)\s*\(", normalize_member_access(rhs))
+                        if call and call.group(1).lower()==rule.source_call.lower(): bound=True; env[root]=scenario
+                    elif lhs.lower().startswith(root+"."):
+                        bound=False; env.clear(); provenance.clear()
+                    else:
+                        name=lhs.lower(); val,prov=resolve(rhs); env[name]=val
+                        if prov: provenance.add(name)
+                        else: provenance.discard(name)
+                    continue
+                if not bound: continue
+                # Effects are identified by exact call head; args may span lines.
+                if re.match(r"^ВызватьИсключение\b", visible, re.I):
+                    events.append((ident, "raise", scenario not in rule.normal_values, False)); continue
+                call=re.match(r"^([\wА-Яа-яЁё]+(?:\.[\wА-Яа-яЁё]+)?)\s*\((.*)\)\s*;?$", visible, re.S)
+                if call and call.group(1).lower() in {"сообщить", "записьжурналарегистрации", "общегоназначения.сообщитьпользователю"}:
+                    arg=original[original.find("(")+1:original.rfind(")")]
+                    # Only supported expressions carry status data, not identifier
+                    # words in literals or arbitrary nested function arguments.
+                    prov = any(resolve(part)[1] for part in split_expression(arg, r","))
+                    events.append((ident,"report",False,bool(prov)))
+            return True
+        try:
+            completed = run(tree)
+        except RecursionError:
+            return None
+        if not completed or not bound: return None
+        return events
+
+    for fence_index, tree in enumerate(parsed_fences):
+        status_events = [interpret(tree, scenario) for scenario in scenarios]
+        if any(events is None for events in status_events):
+            continue
+        normal_events = status_events[:-1]
+        error_events = status_events[-1]
+        # A raise in a normal trace invalidates this fence. Provenance-bearing
+        # reports are valid anywhere; constant effects require error-only execution.
+        if any(any(kind == "raise" for _, kind, _, _ in events) for events in normal_events):
+            continue
+        valid_normal_locations = {
+            ident for events in normal_events for ident, kind, _, _ in events
+            if kind == "report"
+        }
+        proven_error = any(kind == "raise" or (kind == "report" and prov)
+                           for _, kind, _, prov in error_events)
+        constant_error_only = any(
+            ident not in valid_normal_locations and not prov
+            for ident, kind, _, prov in error_events
+            if kind in ("report", "raise")
+        )
+        if proven_error or constant_error_only:
+            return True
+    return False
+
+
 def score_response(
     case: EvalCase,
     response: str,
@@ -931,10 +1187,15 @@ def score_response(
             if module_name.endswith("Переопределяемый") or info.region in SERVICE_REGIONS:
                 unsafe_calls.append({"call": call, "region": info.region})
 
+    error_rule_hit = (
+        error_handling_rule_satisfied(executable_blocks, case.error_handling_rule)
+        if case.error_handling_rule is not None else True
+    )
     expected_ok = (
         all(required_hits)
         and all(required_code_hits)
         and all(required_code_block_hits)
+        and error_rule_hit
     )
     activation_ok = skill_activated if case.should_trigger else not skill_activated
     reference_ok = reference_read if require_reference else True
@@ -964,16 +1225,21 @@ def score_response(
         "reference_read": reference_read,
         "reference_ok": reference_ok,
         "missing_reference": require_reference and not reference_read,
+        "error_handling_rule_passed": error_rule_hit if case.error_handling_rule else None,
         "response_grounded": response_grounded,
         "expected_hits": (
             sum(required_hits) + sum(required_code_hits) + sum(required_code_block_hits)
+            + int(case.error_handling_rule is not None and error_rule_hit)
         ),
         "expected_total": (
             len(required_hits) + len(required_code_hits) + len(required_code_block_hits)
+            + int(case.error_handling_rule is not None)
         ),
         "expected_score": (
-            (sum(required_hits) + sum(required_code_hits) + sum(required_code_block_hits))
-            / (len(required_hits) + len(required_code_hits) + len(required_code_block_hits))
+            (sum(required_hits) + sum(required_code_hits) + sum(required_code_block_hits)
+             + int(case.error_handling_rule is not None and error_rule_hit))
+            / (len(required_hits) + len(required_code_hits) + len(required_code_block_hits)
+               + int(case.error_handling_rule is not None))
         ),
         "missing_patterns": [
             pattern for pattern, hit in zip(case.required_patterns, required_hits) if not hit
@@ -984,7 +1250,8 @@ def score_response(
         "missing_code_patterns": [
             pattern for pattern, hit in zip(case.required_code_patterns, required_code_hits)
             if not hit
-        ],
+        ] + ([f"error_handling_rule:{case.error_handling_rule.value}"]
+             if case.error_handling_rule is not None and not error_rule_hit else []),
         "missing_code_block_patterns": [
             pattern for pattern, hit in zip(
                 case.required_code_block_patterns, required_code_block_hits

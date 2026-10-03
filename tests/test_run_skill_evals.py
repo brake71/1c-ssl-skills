@@ -94,6 +94,19 @@ class EvalCorpusTests(unittest.TestCase):
             with self.assertRaisesRegex(runner.EvalError, "Invalid regex"):
                 runner.load_cases(path)
 
+    def test_error_handling_rule_is_optional_and_configuration_is_validated(self):
+        payload = {"version": 1, "cases": [self._raw_case("rule-case")]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertIsNone(runner.load_cases(path)[0].error_handling_rule)
+            payload["cases"][0]["error_handling_rule"] = {
+                "value": "Результат.КодОшибки", "source_call": "Модуль.Метод", "normal_values": []
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(runner.EvalError, "invalid error_handling_rule"):
+                runner.load_cases(path)
+
     def test_duplicate_case_id_is_rejected(self):
         payload = {
             "version": 1,
@@ -518,6 +531,8 @@ class ResponseScoringTests(unittest.TestCase):
             ("", "\n\nМетод возвращает строку, отдельно форматировать её не нужно."),
             ("", "\n\nТаблица уже создана БСП; создавать коллекцию в менеджере не нужно."),
             ("", "\n\nПроверка на другом примере дала неверный результат."),
+            ("", '\n\nДругие коды, например "НеверныйЛогинИлиПароль", нужно обработать.'),
+            ("", '\n\nВозможны, например, `"ОбновлениеНеТребуется"` и `"НеверныйЛогинИлиПароль"`.'),
         )
         for prefix, suffix in contexts:
             with self.subTest(prefix=prefix, suffix=suffix):
@@ -960,6 +975,156 @@ class CorpusCriteriaTests(unittest.TestCase):
         wrong_visibility = frame.replace('"Проведен", Истина',
                                          '"Проведен", Истина, ВидСравненияКомпоновкиДанных.НеРавно')
         self.assertFalse(runner.score_response(case, wrong_visibility + "\n\nХук нельзя вызывать напрямую.", {})["passed"])
+
+    def test_classifier_error_handling_rule_is_bounded_and_provenance_aware(self):
+        case = self.case("classifiers-update-public-boundary")
+
+        def score(body):
+            response = (
+                "РаботаСКлассификаторамиВызовСервера — служебный API.\n```bsl\n"
+                "Результат = РаботаСКлассификаторами.ОбновитьКлассификаторы(Идентификаторы);\n"
+                f"{body}\n```"
+            )
+            return runner.score_response(case, response, {})["passed"]
+
+        self.assertFalse(
+            score('ВызватьИсключение "Не удалось обновить" + Результат.КодОшибки;'),
+            "an unconditional raise executes for normal statuses",
+        )
+
+        good = (
+            'Если Не ПустаяСтрока(Результат.КодОшибки) И '
+            'Результат.КодОшибки <> "ОбновлениеНеТребуется" Тогда\n'
+            '    ВызватьИсключение "Не удалось обновить: " + Результат.КодОшибки;\n'
+            'КонецЕсли;'
+        )
+        self.assertTrue(score(good))
+        self.assertTrue(score(
+            'Если Не ПустаяСтрока(Результат.КодОшибки)\n'
+            '        И Результат.КодОшибки <> "ОбновлениеНеТребуется" Тогда\n'
+            '    ВызватьИсключение\n        "Ошибка: " + Результат.КодОшибки;\nКонецЕсли;'
+        ))
+        self.assertTrue(score(
+            'Если ЗначениеЗаполнено(Результат.КодОшибки) И '
+            'Результат.КодОшибки <> "ОбновлениеНеТребуется" Тогда\n'
+            '    ОбщегоНазначения.СообщитьПользователю(\n'
+            '        "Ошибка обновления");\nКонецЕсли;'
+        ))
+        self.assertTrue(score('Сообщить("Код: "+Результат.КодОшибки);'))
+        self.assertTrue(score('ЗаписьЖурналаРегистрации("Обновление", , , , Результат.КодОшибки);'))
+        self.assertFalse(score('Если НеизвестноеУсловие Тогда\nСообщить(Результат.КодОшибки);\nКонецЕсли;'))
+        self.assertFalse(score('Код = Результат.КодОшибки; Код = "Код"; Сообщить(Код);'))
+        self.assertFalse(score('Результат.КодОшибки = ""; Сообщить(Результат.КодОшибки);'))
+        self.assertFalse(score('Результат = Неопределено; Сообщить(Результат.КодОшибки);'))
+        self.assertFalse(score('FakeModule.Сообщить(Результат.КодОшибки);'))
+        self.assertFalse(score('Если Результат.КодОшибки = "" Тогда\nВызватьИсключение "ошибка";\nКонецЕсли;'))
+        self.assertFalse(score('Сообщить("готово");'))
+        self.assertFalse(score('ВызватьИсключение "ошибка";'))
+        self.assertTrue(score(
+            'Если ЗначениеЗаполнено(Результат.КодОшибки) И '
+            'Результат.КодОшибки <> "ОбновлениеНеТребуется" Тогда\n'
+            '    Сообщить(Результат.КодОшибки);\nКонецЕсли;'
+        ))
+        self.assertTrue(score(
+            'Если Результат.КодОшибки = "" ИЛИ '
+            'Результат.КодОшибки = "ОбновлениеНеТребуется" Тогда\n'
+            '    Сообщить("Все в порядке");\nИначе\n'
+            '    ВызватьИсключение Результат.КодОшибки;\nКонецЕсли;'
+        ))
+        self.assertTrue(score(
+            'code = Результат.КодОшибки; code2 = code;\n'
+            'Если Не ПустаяСтрока(code2) И code2 <> "ОбновлениеНеТребуется" Тогда\n'
+            '    Сообщить("Ошибка: " + code2);\nКонецЕсли;'
+        ))
+        self.assertFalse(score(
+            'code = Результат.КодОшибки; code2 = code; code2 = "";\n'
+            'Сообщить("Ошибка: " + code2);'
+        ))
+        self.assertFalse(score(
+            'Если Результат.КодОшибки = "ОбновлениеНеТребуется" Тогда\n'
+            '    ВызватьИсключение Результат.КодОшибки;\nКонецЕсли;'
+        ))
+        self.assertTrue(score(
+            'code = Результат.КодОшибки; code2 = code;\n'
+            'Если Не ПустаяСтрока(code2) И code2 <> "ОбновлениеНеТребуется" Тогда\n'
+            '    ВызватьИсключение "Ошибка: " + code2;\nКонецЕсли;'
+        ))
+        self.assertTrue(score(
+            'Если Не ПустаяСтрока(Результат.КодОшибки) Тогда\n'
+            '    ОбщегоНазначения.СообщитьПользователю("Ошибка: " + Результат.КодОшибки);\nКонецЕсли;'
+        ))
+        self.assertTrue(score(
+            'Если Не ПустаяСтрока(Результат.КодОшибки) Тогда\n'
+            '    ЗаписьЖурналаРегистрации("Обновление", , , , Результат.КодОшибки);\nКонецЕсли;'
+        ))
+        self.assertFalse(score('// Сообщить(Результат.КодОшибки);'))
+        self.assertFalse(score('Текст = "Сообщить(Результат.КодОшибки);";'))
+        self.assertFalse(score('ВызватьИсключение "Не удалось");'))
+        self.assertFalse(score(
+            'Если Не ПустаяСтрока(Результат.КодОшибки) Тогда\n'
+            '    Для каждого Элемент Из Массив Цикл\nКонецЦикла;\n'
+            '    Сообщить(Результат.КодОшибки);\nКонецЕсли;'
+        ))
+        rule = case.error_handling_rule
+        source = 'Результат = РаботаСКлассификаторами.ОбновитьКлассификаторы(Идентификаторы);'
+        self.assertFalse(runner.error_handling_rule_satisfied([
+            'Сообщить(Результат.КодОшибки);', source
+        ], rule))
+        self.assertFalse(runner.error_handling_rule_satisfied([
+            source, 'Если Не ПустаяСтрока(Результат.КодОшибки) Тогда\\n'
+            'Сообщить(Результат.КодОшибки);\\nКонецЕсли;'
+        ], rule))
+        self.assertFalse(runner.error_handling_rule_satisfied([source + '\\n' * 65537], rule))
+
+    def test_classifier_boundary_accepts_natural_warning_word_order(self):
+        case = self.case("classifiers-update-public-boundary")
+        code = ('\n```bsl\nРезультат = РаботаСКлассификаторами.'
+                'ОбновитьКлассификаторы(Идентификаторы);\n'
+                'Сообщить(Результат.КодОшибки);\n```')
+        for warning in (
+            "РаботаСКлассификаторамиВызовСервера: вызывать его вместо документированного метода не следует.",
+            "РаботаСКлассификаторамиВызовСервера.ОбновитьКлассификаторы не существует в БСП 3.1.11.",
+        ):
+            with self.subTest(warning=warning):
+                self.assertTrue(runner.score_response(case, warning + code, {})["passed"])
+
+    def test_error_policy_keeps_fences_branches_and_effect_locations_independent(self):
+        rule = self.case("classifiers-update-public-boundary").error_handling_rule
+        source = "Результат = РаботаСКлассификаторами.ОбновитьКлассификаторы(Идентификаторы);\n"
+        self.assertFalse(runner.error_handling_rule_satisfied(
+            [source, source + 'ВызватьИсключение "ошибка";'], rule))
+        self.assertFalse(runner.error_handling_rule_satisfied([source + '''
+Если Не ПустаяСтрока(Результат.КодОшибки) Тогда
+    // обработать ошибку
+КонецЕсли;
+Сообщить("Успешно");
+'''], rule))
+        self.assertTrue(runner.error_handling_rule_satisfied([source + '''
+Если Результат.КодОшибки = "" Тогда
+    Сообщить("Успех");
+ИначеЕсли Результат.КодОшибки = "ОбновлениеНеТребуется" Тогда
+    Сообщить("Данные актуальны");
+Иначе
+    Если ЗначениеЗаполнено(Результат.КодОшибки) Тогда
+        Сообщить("Ошибка");
+    Иначе
+        Сообщить("Неприменимая ветка");
+    КонецЕсли;
+КонецЕсли;
+'''], rule))
+        self.assertFalse(runner.error_handling_rule_satisfied([source + '''
+Если Результат.КодОшибки = "" Тогда
+    ВызватьИсключение "Нормальный статус";
+Иначе
+    Сообщить(Результат.КодОшибки);
+КонецЕсли;
+'''], rule))
+        self.assertFalse(runner.error_handling_rule_satisfied([source +
+            "Если " + " и ".join(["ЗначениеЗаполнено(Результат.КодОшибки)"] * 256) +
+            " Тогда\nСообщить(Результат.КодОшибки);\nКонецЕсли;"], rule))
+        self.assertFalse(runner.error_handling_rule_satisfied([source +
+            ("Если Не ПустаяСтрока(Результат.КодОшибки) Тогда\n" * 40) +
+            "Сообщить(Результат.КодОшибки);\n" + ("КонецЕсли;\n" * 40)], rule))
 
     def test_fundamentals_requires_server_context_for_server_call_module(self):
         case = self.case("fundamentals-module-and-api-boundaries")

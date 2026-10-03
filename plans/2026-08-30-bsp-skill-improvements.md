@@ -371,6 +371,77 @@ SMS/delete fix всё ещё FAIL: устранение первой ошибк�
   команды и собственный fingerprint, не объединяет метрики с RED/GREEN.
 - Всё остаётся локальным: нет tag, push или публикации, vendor нетронут.
 
+## Consumer checkpoint — 3bdd931 и ASCII bootstrap
+
+Полный `.tmp/consumer-release-candidate-full-3x.json` завершён без resume:
+complete=true, gate PASS, GREEN majority 26/27, individual 73/81,
+quality 75/81, majority activation/reference 26/26, invalid/unsafe/forbidden/
+process/infra 0; RED 14/27. Проверены все четыре fingerprint. Это assisted
+Windows profile с одинаковыми reader instructions для RED/GREEN.
+
+`.tmp/consumer-reader-guidance-free-3x.json`: без reader guidance все 9 BSP
+запусков infrastructure_failed из-за повреждённого stdout. Три plain-BSL
+ответа корректны, но diagnostic helper ошибочно передал require_reference=True
+без проверки scope; исходный отчёт сохранён, helper исправлен отдельно.
+
+`.tmp/consumer-reader-packaged-bootstrap-3x.json`: перенос guidance в русскоязычный
+SKILL/description уменьшил encoding до 3/12, но первое чтение оставалось
+небезопасным. `.tmp/consumer-reader-ascii-bootstrap-3x.json`: после ASCII-only
+маршрутизатора encoding/infra 0/12, majority 4/4, individual 11/12, BSP
+activation 9/9, reference evidence 8/9. Fundamentals run3 ответ правильный,
+но команды rg вернули общий exit1 (недоступные host-plugin paths или второй rg
+без совпадений), поэтому evidence conservatively не засчитан. Raw не пересчитан.
+
+Независимое ревью подтвердило сохранение всех 24 маршрутов и смыслов router;
+vendor finding отклонён: gitlink — пользовательский, не был staged/committed.
+Отдельный анализ classifiers показал две причины: слово НеверныйЛогинИлиПароль
+ошибочно маркировало BSL негативным, но в коде также была только заглушка
+обработки. Первая причина исправлена RED-регрессиями с полными словами вместо
+фрагментов; reference получил реальное исключение только при ошибке, а
+ОбновлениеНеТребуется трактуется штатно. Проверка обработчика должна принимать
+локальные aliases, сообщения/журнал и условное исключение, но не допускать
+безусловное исключение при успехе/штатном статусе. Проверка реализована
+ограниченным AST-анализом без выполнения BSL; source-call, aliases, вложенные
+Если/ИначеЕсли/Иначе и фактические реакции проверяются в одном fence для всех
+статусов. Заглушки, перенос evidence между fences и исключения на штатных
+статусах отвергаются. Финальное независимое review не воспроизвело блокеров.
+
+Проверки текущих bytes: 90 unit PASS, API 663/663, semantic 0 ERROR / 0 WARN,
+dry-run и diff-check PASS. Новое отрицательное API-утверждение подтверждено
+src/cf: предложенного метода в РаботаСКлассификаторамиВызовСервера нет.
+`.tmp/consumer-ascii-final-message-smoke.json`: native GREEN 1/1.
+`.tmp/consumer-ascii-final-classifiers-3x.json`: native GREEN 1/3, gate FAIL,
+обработка ошибки корректна 3/3. В одном ответе нет исходного полного имени,
+другой отклонён за естественный обратный порядок слов предупреждения.
+Последний false negative исправлен отдельным RED→GREEN-тестом; raw не пересчитан.
+
+Все предыдущие отчёты/архивы сохранены. Запущены новый полный 27 × 3
+`.tmp/consumer-ascii-final-full-3x.json` и отдельный guidance-free archive smoke
+`.tmp/consumer-reader-final-guidance-free-3x.json` на окончательных fingerprint.
+Guidance-free завершён: majority 4/4, individual 10/12, quality 11/12,
+BSP activation/reference 9/9, infrastructure 0/12. Fundamentals run3 пропустил
+два полных имени модулей; plain-BSL run1 ошибочно активировал скил при правильном
+ответе. Classifiers 3/3. Raw сохранён, hashes совпадают с final bytes.
+ZIP/tar.gz по 29 файлов побайтно проверены; install + update упакованными Bash
+и PowerShell установщиками в отдельных локальных путях с пробелами PASS.
+Полный native RED/GREEN завершён без resume: complete=true, gate PASS.
+GREEN majority 25/27, individual 72/81, quality 77/81, majority activation/
+reference 26/26; invalid/unsafe/forbidden/process/policy/infra 0. RED majority
+13/27, individual 36/81, invalid 4, unsafe 7, forbidden 2, infra 0.
+Все четыре fingerprint совпали с final bytes. Classifiers GREEN 3/3.
+
+Кандидат выполняет текущие gate, но не доказывает полную повторяемость:
+fundamentals 1/3 (в двух ответах пропущено по одному имени), plain-BSL 1/3
+(две лишние активации); по одному reference-read failure у long-operation,
+currency-rates и business-statistics. External-component run2 — пропущено
+предупреждение. PDn run2 правильно вызывает API и предупреждает о служебном
+альтернативном методе, но BSL исключён scorer: отдельный false-negative debt.
+Raw сохранён без пересчёта. Полный прогон assisted; archive diagnostic —
+ограниченный guidance-free, с ним метрики не объединяются.
+
+Готовность кандидата по gate подтверждена; публикация требует отдельного
+разрешения. Нет tag/push/release.
+
 ## Next — закрыть behavioral debt в v0.13
 
 1. Приоритет — автоматическое обнаружение project-scoped скила:

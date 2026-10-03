@@ -1,148 +1,120 @@
 ---
 name: bsp
-description: "1С:БСП 3.1.11 — разработка и ревью прикладного кода. Применяй при запросах о БСП и её API, даже если ответ кажется известным: сверка общих модулей, сигнатур и регионов; длительные и регламентные задания, обмен, печать, файлы, доступ, обновление, ЭП/МЧД, мультиязычность, поиск дублей и замена ссылок. Используй также для реализации *Переопределяемый и выбора между публичным, служебным и устаревшим API. Не используй для задач только по синтаксису платформы 1С, не связанных с БСП."
+description: "1C:BSP 3.1.11 application development and code review. Use for BSP and its APIs even when the answer seems familiar: common modules, signatures, API regions, background/scheduled jobs, exchange, printing, files, access, upgrades, signatures/powers of attorney, multilingual code, duplicates and reference replacement. Also use for overridable hooks and public/internal/deprecated API choices. Do not use for plain 1C platform syntax unrelated to BSP. Windows: read references with native rg or Python UTF-8 stdout, not PowerShell content cmdlets/pipelines."
 ---
 
-# Применение БСП 3.1.11 в прикладной разработке
+# Using 1C:BSP 3.1.11 in application code
 
-Скил учит **правильно применять** Библиотеку стандартных подсистем 1С (версия
-3.1.11) в прикладном коде: какие общие модули и методы вызывать, с какими
-параметрами, какие нюансы и антипаттерны. Скил **самодостаточен** — в нём нет
-ссылок на внешнюю документацию и хардкод-номеров строк; параметры и рабочие
-примеры даны inline в `references/`. Пути `references/` и `scripts/` разрешай
-относительно каталога этого `SKILL.md`, независимо от каталога проекта или
-места установки скила.
+This router is ASCII-only so that its initial read is safe even with a legacy
+Windows stdout code page. The task references remain UTF-8 Russian, with exact
+BSL names, signatures, regions, parameters, examples and pitfalls.
 
-Каждый reference — workflow-сценарии вида «задача → функция (полная сигнатура
-+ регион) → параметры → пример → нюансы/антипаттерны». Это не карта методов
-(которую отдаёт греп), а знание как применять БСП правильно.
+## Reading UTF-8 files on Windows
 
-Если доступна XML-выгрузка БСП, дополнительно подтверди сигнатуры/регионы
-через `scripts/bsp_api.py` или поиск (см. ниже). Выгрузка не поставляется со
-скилом; `src/cf/` — пример пути, не требование к проекту. Без неё используй
-проверенные references. Регион БСП = имя `#Область …`:
-`ПрограммныйИнтерфейс` (stable, вызывать), `СлужебныйПрограммныйИнтерфейс` /
-`СлужебныеПроцедурыИФункции` (⚠️ служебный), `УстаревшиеПроцедурыИФункции`
-(⚠️ deprecated), модули `*Переопределяемый` (хук переопределения — БСП
-вызывает, прикладной код реализует, **не** вызывается напрямую).
-
-## Порядок работы
-
-1. Определи прикладную задачу и выбери по таблице ниже один основной reference.
-   Подключай второй только для действительно сквозного сценария, например печати
-   в фоне.
-2. Обязательно открой выбранный основной reference: одной таблицы маршрутизатора
-   недостаточно для ответа. Не отвечай по памяти или общим знаниям платформы,
-   пока не сверил конкретный сценарий БСП в reference. Найди сценарий по заголовкам
-   `###` и ключевым словам через `rg -n`; затем прочитай диапазон строк со сценарием,
-   сигнатурами, примером и антипаттернами. Шаг завершён, когда правила и пример
-   ответа сверены с этим диапазоном. Загружай файл целиком только когда чтение
-   диапазона недоступно; не переноси в контекст несвязанные сценарии большого файла.
-3. Если пользователь предлагает готовый вызов или совет, сверь его исходное
-   полное имя `Модуль.Метод` и назначение. Явно назови найденное расхождение:
-   исправленный пример не делает исходный совет правильным.
-4. Выбирай прямой вызов только из стабильного `ПрограммныйИнтерфейс`.
-   Служебный или устаревший метод предлагай лишь с явным предупреждением и когда
-   публичной альтернативы нет. Метод `*Переопределяемый` показывай как реализацию
-   хука без прямого вызова через имя общего модуля.
-5. Если в проекте доступна выгрузка с `CommonModules/`, перед финальным ответом
-   проверь каждую рекомендуемую сигнатуру через `bsp_api.py`. Если выгрузки нет,
-   используй reference и явно не заявляй, что выполнил сверку с исходниками.
-6. В ответе дай выбранный API, контекст выполнения (клиент/сервер), минимальный
-   BSL-пример и важные ограничения. Перед выдачей сопоставь полное имя
-   `Модуль.Метод` и порядок аргументов каждого вызова БСП с reference или
-   доступной выгрузкой; прикладные имена объектов и обработчиков бери из задачи
-   или проекта. Не выдумывай отсутствующие методы для
-   симметрии с другими модулями. Отсутствующие, служебные и запрещённые вызовы
-   описывай текстом или inline-кодом, но не помещай в исполняемый fenced
-   BSL-блок: такой пример легко ошибочно скопировать как рекомендацию.
-
-## Навигация по задачам
-
-По ключевой задаче выбери основной reference:
-
-| Задача / ключевые слова | Reference | Подсистемы БСП |
-|---|---|---|
-| Суффиксы модулей, найти модуль, карта подсистем, stable/хук | `fundamentals.md` | навигатор |
-| Сообщение пользователю (включая привязку к полю в серверной проверке), сериализация XML/JSON, реквизиты по ссылке, безопасное хранилище, строки, даты, временный каталог | `base-common.md` | БазоваяФункциональность; при проверке доп. реквизитов подключай `forms-validation.md` вторым |
-| Фоновое задание, длительная операция, прогресс, регламентное задание | `longs-and-jobs.md` | БазоваяФункциональность, РегламентныеЗадания |
-| Префикс номера объекта, префикс ИБ, область данных | `prefixes.md` | ПрефиксацияОбъектов |
-| Обновление ИБ, версия ИБ, миграция, обработчик обновления | `update.md` | ОбновлениеВерсииИБ, ОбновлениеКонфигурации |
-| Обмен данными, узлы обмена, регистрация изменений | `data-exchange.md` | ОбменДанными |
-| Электронная подпись (ЭП), МЧД, криптография, DSS, проверка подписи | `esign-mcd.md` | ЭлектроннаяПодпись, МашиночитаемыеДоверенности |
-| Контактная информация, адрес, ОКТМО/КЛАДР, адресный классификатор | `contact-info.md` | КонтактнаяИнформация, АдресныйКлассификатор |
-| Классификаторы (страны и пр. вне адресных) | `classifiers.md` | классификаторы |
-| Валюты, курсы, банки, счета, графики/календари работы | `currencies-banks.md` | Валюты, Банки, ГрафикиРаботы |
-| Внешние компоненты, OData | `external-components.md` | ВнешниеКомпоненты, ИнтерфейсOData |
-| Пользователи, доступ, RLS, группы доступа, профили групп | `users-access.md` | Пользователи, УправлениеДоступом |
-| Почта, SMS, шаблоны сообщений, обсуждения, взаимодействия | `comms.md` | РаботаСПочтовымиСообщениями, ОтправкаSMS, ШаблоныСообщений, Обсуждения, Взаимодействия |
-| Бизнес-процессы, задачи | `bp-tasks.md` | БизнесПроцессыИЗадачи |
-| Завершение работы пользователей, удаление помеченных, профили безопасности | `admin-tools.md` | ЗавершениеРаботыПользователей, УдалениеПомеченныхОбъектов, ПрофилиБезопасности |
-| Резервное копирование ИБ | `backup.md` | РезервноеКопированиеИБ |
-| Оценка производительности, центр мониторинга, контроль работы пользователей | `perf-monitoring.md` | ОценкаПроизводительности, ЦентрМониторинга, КонтрольРаботыПользователей |
-| Защита персональных данных (ПДн), грифы | `protection-pd.md` | ЗащитаПерсональныхДанных |
-| Подключаемые команды, дополнительные отчёты/обработки (ВПФ/ОРФ) | `commands-external.md` | ПодключаемыеКоманды, ДополнительныеОтчетыИОбработки |
-| Печать, менеджер печати, варианты отчётов, СКД | `print-reports.md` | Печать, ВариантыОтчетов |
-| Запрет редактирования реквизитов, свойства, даты запрета изменения | `forms-validation.md` | ЗапретРедактированияРеквизитовОбъектов, Свойства, ДатыЗапретаИзменения |
-| Файлы (справочник Файлы), тома, версии объектов, выгрузка в файл | `files-and-versions.md` | РаботаСФайлами, ВерсионированиеОбъектов, ВыгрузкаОбъектовВФайлы |
-| Мультиязычность, НСтр, текущий язык, локализация | `multilang.md` | Мультиязычность |
-| Поиск дублей, групповое изменение, структура подчинённости | `report-dedup.md` | ПоискИУдалениеДублей, ГрупповоеИзменениеОбъектов, СтруктураПодчиненности |
-
-Если задача не попадает в таблицу — начни с `fundamentals.md` (карта подсистем,
-логика суффиксов/stable). Часть подсистем БСП намеренно вне скила (нет
-востребованного прикладного API) — см. `fundamentals.md`.
-
-## Шаблоны поиска по выгрузке конфигурации
-
-Экспортные методы модуля:
-```bash
-rg -n "^(Функция|Процедура)\s+\w+.*Экспорт" src/cf/CommonModules/<Модуль>/Ext/Module.bsl
-```
-
-Метод по имени во всех модулях:
-```bash
-rg -l "^(Функция|Процедура)\s+<Метод>\b" src/cf/CommonModules/
-```
-
-Регион метода (проверить stable/служебный/устаревший):
-```bash
-rg -n "^#Область\s+(ПрограммныйИнтерфейс|СлужебныйПрограммныйИнтерфейс|СлужебныеПроцедурыИФункции|УстаревшиеПроцедурыИФункции|ПереопределениеВызовов)" src/cf/CommonModules/<Модуль>/Ext/Module.bsl
-```
-
-Подсистема, содержащая общий модуль (по ссылкам в XML подсистем):
-```bash
-rg -l "CommonModule\.<Модуль>" src/cf/Subsystems/
-```
-
-⚠️ «Найти подсистему объекта (Catalog/Document)» простым текстовым поиском нельзя —
-нужен XML-разбор `Subsystems/<Имя>.xml` (теги `<Item>` со ссылками
-`Catalog.`/`Document.`/`CommonModule.`). При необходимости — ручной шаг:
-открыть `Subsystems/СтандартныеПодсистемы/Subsystems/<Имя>.xml` и найти
-`<Item>` со ссылкой на объект.
-
-## Скрипт `scripts/bsp_api.py`
-
-Три команды, `--src <path>` обязательный (путь к корню выгрузки конфигурации с
-`CommonModules/`, напр. `src/cf`). Вместо `<skill-dir>` подставь каталог, где
-лежит этот `SKILL.md`:
+Use a native UTF-8 reader: `rg -n . -- "PATH"` reads a file; rg patterns and
+`-A`/`-B`/`-C` select a section. Replace PATH with the installed file's path;
+quote paths containing spaces. Alternatively, read with explicit Python UTF-8:
 
 ```bash
-# Найти модуль + полную сигнатуру + имя региона + doc-комментарий + путь + диапазон строк.
-# Если метод в нескольких модулях с разными сигнатурами — уточни --module.
-python <skill-dir>/scripts/bsp_api.py method <ИмяМетода> [--module <ИмяМодуля>] --src src/cf
-
-# Все экспортные методы одного модуля с сигнатурами + регион + диапазон строк.
-# Для модулей *Переопределяемый помечает, что методы — хуки переопределения.
-python <skill-dir>/scripts/bsp_api.py module <ИмяМодуля> --src src/cf
-
-# Модули со stable API (регион ПрограммныйИнтерфейс + экспортные методы).
-python <skill-dir>/scripts/bsp_api.py modules --src src/cf
+python -X utf8 -c "import sys; from pathlib import Path; sys.stdout.reconfigure(encoding='utf-8'); print(Path(sys.argv[1]).read_text(encoding='utf-8'))" "PATH"
 ```
 
-Разница `module` (один модуль, все регионы) vs `modules` (список модулей, только
-stable) — ключевая, не путать. Вывод `method` помечает ⚠️ хуки переопределения
-(модуль `*Переопределяемый`), deprecated и служебные методы — чтобы не выдать их
-как «вызови из прикладного кода».
+`Get-Content -Encoding UTF8` controls input decoding, not captured stdout.
+Avoid PowerShell content cmdlets and piping native readers through
+`Select-String`, `Select-Object` or `Where-Object`: they may re-encode stdout.
+Filter inside rg or Python instead. Apply UTF-8 reading to project files too;
+do not combine a safe skill read with an unsafe README read. Do not change
+global shell settings.
 
-`--src` обязателен, без автоопределения. Неверный путь или отсутствие
-`CommonModules/` — ненулевой код возврата.
+## Workflow
+
+1. Select one primary reference from the task table. Add a second only for a
+   genuinely cross-cutting task, such as printing in a background job.
+2. Open the selected reference before answering; the router and remembered
+   platform knowledge are insufficient. Locate the scenario using `rg -n`
+   headings/keywords, then read its rules, signature, example and pitfalls
+   with native rg context options or Python. This step is complete when the
+   proposed answer is checked against that section. Read the whole file only
+   if section reading is unavailable; avoid unrelated material.
+3. If the user proposes a call or rule, check its original full `Module.Method`
+   name and purpose. Explicitly identify any mismatch: a corrected example
+   does not make the original advice correct.
+4. Prefer the stable public programmatic-interface region. Internal or
+   deprecated APIs require an explicit warning and no public alternative.
+   Show overridable-module hooks as implementations: BSP calls them;
+   application code implements them, not a direct qualified module call.
+   Exact Russian region and suffix names are documented in `fundamentals.md`.
+5. If a configuration XML export containing `CommonModules/` is available,
+   additionally verify each recommended signature/region with `bsp_api.py`.
+   Otherwise use the supplied reference and do not claim source verification.
+6. Answer in the user's language: API, client/server execution context,
+   minimal BSL example and important constraints. Check each full BSP call
+   name and argument order against the reference or available export.
+   Take application-specific object/handler names from the task or project;
+   do not invent symmetric BSP methods. Discuss absent/internal/forbidden
+   calls in prose or inline code, not a runnable fenced BSL example.
+
+The skill is self-contained and needs no developer documentation or source
+export. Resolve `references/` and `scripts/` relative to this installed
+`SKILL.md`, not the project's working directory. `src/cf/` is only an example
+export path, not a consumer project requirement.
+
+## Task routing
+
+| Primary task | Reference |
+|---|---|
+| Module suffixes, locating modules, subsystem map, stable API vs hooks | `references/fundamentals.md` |
+| User messages (including binding to a field during server validation), XML/JSON, attributes by reference, secure storage, strings, dates, temporary directories | `references/base-common.md`; add `references/forms-validation.md` for additional-attribute validation |
+| Background/long-running operations, progress, scheduled jobs | `references/longs-and-jobs.md` |
+| Object numbering prefix, infobase prefix, data area | `references/prefixes.md` |
+| Infobase upgrade/version, migration, update handler | `references/update.md` |
+| Data exchange, exchange nodes, change registration | `references/data-exchange.md` |
+| Electronic signatures, machine-readable powers of attorney (MCD), cryptography, DSS, signature checks | `references/esign-mcd.md` |
+| Contact information, addresses, OKTMO/KLADR, address classifier | `references/contact-info.md` |
+| Other classifiers, including countries | `references/classifiers.md` |
+| Currencies, exchange rates, banks/accounts, work schedules/calendars | `references/currencies-banks.md` |
+| External components, OData | `references/external-components.md` |
+| Users, permissions, RLS, access groups/profiles | `references/users-access.md` |
+| Email, SMS, message templates, discussions/interactions | `references/comms.md` |
+| Business processes and tasks | `references/bp-tasks.md` |
+| User-session termination, deleting marked objects, security profiles | `references/admin-tools.md` |
+| Infobase backup | `references/backup.md` |
+| Performance assessment, monitoring center, user activity | `references/perf-monitoring.md` |
+| Personal-data protection/destruction dates, classification labels | `references/protection-pd.md` |
+| Connected commands, external reports/processors | `references/commands-external.md` |
+| Printing, print manager, report variants, data composition (SKD) | `references/print-reports.md` |
+| Locking/unlocking form attributes, properties, change-prohibition dates | `references/forms-validation.md` |
+| Files, volumes, versioning, writing a file | `references/files-and-versions.md` |
+| Multilingual code, NStr, current language, localization | `references/multilang.md` |
+| Duplicates, bulk modification, subordinate structure, reference replacement | `references/report-dedup.md` |
+
+For an unmapped task, start with `fundamentals.md`. It also lists intentionally
+uncovered subsystems. References are workflows, not just a searchable method
+catalog: use the complete scenario, not an isolated matching name.
+
+## Optional configuration-export verification
+
+Replace SKILL_DIR with this installed skill directory, CF_EXPORT with the
+export root containing `CommonModules/`, and MODULE/METHOD with real names.
+The export is read-only and not bundled. Python UTF-8 mode keeps CLI output
+readable on Windows without changing global settings.
+
+```bash
+# Signature, region, documentation, source path and line range.
+python -X utf8 "SKILL_DIR/scripts/bsp_api.py" method METHOD --module MODULE --src "CF_EXPORT"
+
+# One module's exported methods across all regions.
+python -X utf8 "SKILL_DIR/scripts/bsp_api.py" module MODULE --src "CF_EXPORT"
+
+# Modules exposing stable public API.
+python -X utf8 "SKILL_DIR/scripts/bsp_api.py" modules --src "CF_EXPORT"
+```
+
+`--module` disambiguates same-named methods. `--src` is mandatory: no automatic
+export discovery; missing paths or `CommonModules/` yield a nonzero exit code.
+`module` includes all regions; `modules` lists stable API modules only. The
+output marks hooks, internal and deprecated methods; retain these warnings.
+
+A text search of subsystem XML can locate a common-module reference, but
+assigning Catalog/Document objects to a subsystem requires parsing its
+`Item` references, including nested subsystem XML, not a guessed grep match.
