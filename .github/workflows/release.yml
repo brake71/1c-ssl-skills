@@ -21,13 +21,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Pack BSP skill and installers
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
         run: |
-          ZIP_NAME="bsp-skill-${{ github.ref_name }}.zip"
-          TAR_NAME="bsp-skill-${{ github.ref_name }}.tar.gz"
-          zip -r "$ZIP_NAME" skills/bsp install.sh install.ps1
-          tar -czf "$TAR_NAME" skills/bsp install.sh install.ps1
-          echo "zip_name=$ZIP_NAME" >> "$GITHUB_ENV"
-          echo "tar_name=$TAR_NAME" >> "$GITHUB_ENV"
+          python ci/build_release.py --ref HEAD --version "$RELEASE_VERSION" --output-dir release-assets
+          echo "zip_name=release-assets/bsp-skill-${RELEASE_VERSION}.zip" >> "$GITHUB_ENV"
+          echo "tar_name=release-assets/bsp-skill-${RELEASE_VERSION}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

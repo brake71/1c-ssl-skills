@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 import sys
@@ -465,6 +466,30 @@ class ResponseScoringTests(unittest.TestCase):
         score = runner.score_response(self.case, unsafe, self.method_index)
         self.assertFalse(score["passed"])
         self.assertEqual(score["invalid_methods"], ["ТестовыйМодуль.Опечатка"])
+
+    def test_deictic_warning_about_named_other_method_keeps_public_code(self):
+        block = "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```"
+        warning = (
+            "\n\nСовет не подходит: `ДругойМетод` возвращает плановый срок; "
+            "этот метод находится в служебном API, а не в стабильном публичном API."
+        )
+        self.assertTrue(runner.score_response(self.case, block + warning, self.method_index)["passed"])
+        unsafe = block.replace("СтабильныйМетод();", "СтабильныйМетод();\nТестовыйМодуль.Опечатка();")
+        self.assertEqual(runner.score_response(self.case, unsafe + warning, self.method_index)["invalid_methods"],
+                         ["ТестовыйМодуль.Опечатка"])
+        for name in ("СтабильныйМетод", "ТестовыйМодуль.СтабильныйМетод"):
+            with self.subTest(name=name):
+                self.assertEqual(runner.executable_bsl_blocks(block + warning.replace("ДругойМетод", name)), [])
+
+    def test_deictic_warning_without_named_other_method_still_rejects_code(self):
+        block = "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```"
+        for warning in (
+            "Этот метод не следует вызывать.",
+            "Этот метод не подходит для параметра `ДругойМетод`.",
+            "Метод `ТестовыйМодуль.СтабильныйМетод` не подходит; этот метод не следует вызывать.",
+        ):
+            with self.subTest(warning=warning):
+                self.assertEqual(runner.executable_bsl_blocks(block + "\n\n" + warning), [])
 
     def test_positive_clause_does_not_override_warning_about_the_same_call(self):
         warning = "ТестовыйМодуль.СтабильныйМетод использовать не следует."
@@ -1150,6 +1175,19 @@ class CorpusCriteriaTests(unittest.TestCase):
 
 
 class StagingTests(unittest.TestCase):
+    def test_fingerprint_uses_posix_name_order_on_every_platform(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp)
+            files = {"SKILL.md": b"router", "agents/openai.yaml": b"metadata",
+                     "references/topic.md": b"reference", "scripts/api.py": b"script"}
+            digest = hashlib.sha256()
+            for name, data in sorted(files.items()):
+                path = source / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+                digest.update(name.encode("utf-8") + b"\0" + data + b"\0")
+            self.assertEqual(runner.skill_sha256(source), digest.hexdigest())
+
     def test_staging_copies_and_cleans_only_target_skill(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

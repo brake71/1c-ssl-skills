@@ -1,0 +1,4 @@
+# Release payloads use the same LF bytes on Windows and Unix checkouts.
+skills/bsp/** text eol=lf
+install.sh text eol=lf
+install.ps1 text eol=lf

@@ -15,6 +15,7 @@ on:
       - '.gitmodules'
       - '.github/workflows/release.yml'
       - '.github/workflows/validate-skills.yml'
+      - '.gitattributes'
   pull_request:
     paths:
       - 'skills/**'
@@ -27,6 +28,7 @@ on:
       - '.gitmodules'
       - '.github/workflows/release.yml'
       - '.github/workflows/validate-skills.yml'
+      - '.gitattributes'
   workflow_call:
 
 jobs:
@@ -47,6 +49,8 @@ jobs:
         run: |
           python -m py_compile skills/bsp/scripts/bsp_api.py
           python -m py_compile ci/validate_key_methods.py
+          python -m py_compile ci/run_skill_evals.py
+          python -m py_compile ci/build_release.py
 
       - name: Run parser and validator tests
         run: python -m unittest discover -s tests -v
@@ -84,19 +88,29 @@ jobs:
           print(f'OK: {path}')
           "
 
-      - name: Smoke test Bash installer
-        run: |
-          bash -n install.sh
-          bash install.sh --source "$PWD" --target "$RUNNER_TEMP/bash-skills"
-          diff -qr skills/bsp "$RUNNER_TEMP/bash-skills/bsp"
-          bash install.sh --source "$PWD" --target "$RUNNER_TEMP/bash-skills"
+      - name: Build canonical archive fixture
+        run: >-
+          python ci/build_release.py --ref HEAD --version v0.0-ci
+          --output-dir "$RUNNER_TEMP/bsp-candidate"
 
-      - name: Smoke test PowerShell installer
+      - name: Smoke test packaged Bash installer
+        run: |
+          SOURCE="$RUNNER_TEMP/bsp-candidate/extracted"
+          bash -n "$SOURCE/install.sh"
+          bash "$SOURCE/install.sh" --source "$SOURCE" --target "$RUNNER_TEMP/bash skills"
+          diff -qr "$SOURCE/skills/bsp" "$RUNNER_TEMP/bash skills/bsp"
+          bash "$SOURCE/install.sh" --source "$SOURCE" --target "$RUNNER_TEMP/bash skills"
+          diff -qr "$SOURCE/skills/bsp" "$RUNNER_TEMP/bash skills/bsp"
+
+      - name: Smoke test packaged PowerShell installer
         shell: pwsh
         run: |
-          ./install.ps1 -SourceDirectory $PWD -Target "$env:RUNNER_TEMP/pwsh-skills"
-          $sourceRoot = (Resolve-Path skills/bsp).Path
-          $installedRoot = (Resolve-Path "$env:RUNNER_TEMP/pwsh-skills/bsp").Path
+          $source = "$env:RUNNER_TEMP/bsp-candidate/extracted"
+          $target = "$env:RUNNER_TEMP/pwsh skills"
+          & "$source/install.ps1" -SourceDirectory $source -Target $target
+          & "$source/install.ps1" -SourceDirectory $source -Target $target
+          $sourceRoot = (Resolve-Path "$source/skills/bsp").Path
+          $installedRoot = (Resolve-Path "$target/bsp").Path
           $sourceFiles = Get-ChildItem $sourceRoot -Recurse -File | ForEach-Object {
             "$($_.FullName.Substring($sourceRoot.Length))=$((Get-FileHash $_.FullName).Hash)"
           } | Sort-Object
@@ -106,7 +120,6 @@ jobs:
           if (Compare-Object $sourceFiles $installedFiles) {
             throw "PowerShell installer output differs from skills/bsp"
           }
-          ./install.ps1 -SourceDirectory $PWD -Target "$env:RUNNER_TEMP/pwsh-skills"
 
       # NOTE: Semantic validation requires the BSP configuration export
       # (src/cf/), which is in .gitignore and not available in CI. Extraction

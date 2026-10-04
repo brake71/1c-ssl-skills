@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — стабилизация перед v0.13
+## Unreleased — v0.13: проверенный релизный кандидат, не опубликован
 
 ### Этап 1 — надёжное чтение UTF-8 в behavioral eval
 
@@ -199,6 +199,48 @@
   в checkout и LF в Git blob. Канонический LF-архив имеет другой fingerprint;
   результаты нельзя автоматически переносить на него. Перед публикацией
   нужно согласовать и проверить точные bytes выпуска.
+
+### Этап 5 — каноническая поставка и финальная проверка v0.13
+
+- Добавлен `ci/build_release.py`: ZIP/tar.gz собираются из Git blobs, а не
+  checkout; порядок, даты и режимы файлов фиксированы, cache/untracked
+  исключены. Manifest хранит исходное дерево, per-file/архивные хеши и
+  fingerprint. Две сборки кандидата дали побайтно одинаковые архивы.
+- Release workflow использует тот же сборщик. CI smoke проверяет install +
+  update обоими **упакованными** установщиками в пути с пробелами.
+  `.gitattributes` фиксирует LF поставки; fingerprint скила сортирует
+  относительные POSIX-имена одинаково на Windows/Linux. Старые платформенные
+  fingerprint не объявляются проверкой новой ревизии.
+- Уточнён scope описания скила: обычный BSL без библиотечной интеграции не
+  требует BSP. Памятка `ОбщегоНазначения*` содержит полный набор обсуждаемых
+  клиентских/серверных/служебных вариантов и критерий завершения ответа.
+- Исправлен PDn false negative scorer: «этот метод» после явно названного
+  другого метода не скрывает рекомендуемый BSL fence. Регрессия RED→GREEN
+  и replay исходного ответа прошли; защитные тесты отрицательных примеров
+  сохранены. Scorer остаётся ограниченной эвристикой, не компилятором BSL.
+- Первый канонический targeted gate был FAIL: fundamentals 1/3. Исходные
+  ответы сохранены; уточнены реальные служебные замены и серверное место
+  исполнения `ВызовСервера`, затем собран **новый** кандидат.
+- Финальные проверки: **98 unit PASS**, API **663/663**, 24 references,
+  semantic **0 ERROR / 0 WARN**, dry-run, py_compile, actionlint и diff-check
+  PASS. Локальные install/update подтвердили побайтное совпадение 27 файлов
+  скила с архивом; глобальные скилы не менялись.
+- Новый consumer smoke PASS; targeted 3 × 3 — **3/3 majority**, 8/9 individual.
+  Полный RED/GREEN 27 × 3 — **gate PASS**, GREEN **27/27 majority**, **78/81
+  individual**, quality 79/81, majority activation/reference **26/26**.
+  Invalid/unsafe/forbidden/process/policy/infra/incomplete **0**. RED —
+  11/27 majority, 34/81 individual; invalid 4, unsafe 11, forbidden 6.
+- Отдельный guidance-free installed-archive diagnostic: **4/4 majority**,
+  **11/12 individual**, BSP activation/reference **9/9**, plain BSL без
+  активации **3/3**, ошибок кодировки/инфраструктуры **0**. Это ограниченный
+  diagnostic с сохранёнными host plugins, не полный unassisted Windows gate.
+- Сырые результаты не пересчитаны и quality failures не заменены повторами.
+  Остался долг scorer по backup/files и эквивалентным формулировкам; один
+  полный currency-запуск не активировал скил/не прочёл reference.
+  PASS означает выполнение gate, не 81/81 гарантированную повторяемость.
+- Точные bytes, fingerprint, отчёты и ограничения зафиксированы в
+  `reports/bsp-skills/v0.13-release-readiness.md`. Тег, push и публикация
+  не выполнялись; выпуск требует отдельного разрешения.
 
 ## 2026-09-28 — строгая проверка API и eval (v0.12)
 

@@ -287,12 +287,13 @@ def file_sha256(path: Path) -> str:
 def skill_sha256(skill_dir: Path) -> str:
     digest = hashlib.sha256()
     for path in sorted(
-        item for item in skill_dir.rglob("*")
-        if item.is_file() and not any(
-            fnmatch.fnmatchcase(part, pattern)
-            for part in item.relative_to(skill_dir).parts
-            for pattern in SKILL_CACHE_PATTERNS
-        )
+        (item for item in skill_dir.rglob("*")
+         if item.is_file() and not any(
+             fnmatch.fnmatchcase(part, pattern)
+             for part in item.relative_to(skill_dir).parts
+             for pattern in SKILL_CACHE_PATTERNS
+         )),
+        key=lambda item: item.relative_to(skill_dir).as_posix(),
     ):
         digest.update(path.relative_to(skill_dir).as_posix().encode("utf-8"))
         digest.update(b"\0")
@@ -813,14 +814,33 @@ def negative_example_context(context: str, code_syntax: str) -> bool:
         return True
     if warning_targets_same_call(context, code_syntax):
         return True
-    # Unnamed negative examples still occur: "вызова вида ... нет",
-    # "таких публичных методов нет", or "этот метод не запускает операцию".
-    return bool(NEGATIVE_BLOCK_RE.search(context) and re.search(
+    if not NEGATIVE_BLOCK_RE.search(context):
+        return False
+    # Unnamed example labels still apply regardless of named references.
+    if re.search(
         r"вызова?\s+вида|\bв\s+частности\b|\bнапример\b|"
         r"\bтаких\s+(?:публичных\s+)?(?:методов|вызовов)\b|"
-        r"\bэтот\s+(?:метод|вызов|код|пример)\b|"
         r"быть\s+не\s+долж", context, re.I
+    ):
+        return True
+    deictic = re.search(r"\bэтот\s+(?:метод|вызов|код|пример)\b", context, re.I)
+    if not deictic:
+        return False
+    # "`OtherMethod` returns ...; this method is internal" refers to the
+    # named method, not the preceding fence. Resolve only explicit method
+    # subjects/labels; an argument name or arbitrary inline code is no evidence.
+    named = list(re.finditer(
+        r"\b(?:метод|вызов)\s+`(?P<label>\w+(?:\.\w+)?)`|"
+        r"`(?P<subject>\w+(?:\.\w+)?)`\s+(?:возвращает|находится|относится)\b",
+        context[:deictic.start()], re.I
     ))
+    if not named:
+        return True
+    target = (named[-1].group("label") or named[-1].group("subject")).lower()
+    calls = {(call.group("module").lower(), call.group("method").lower())
+             for call in CALL_RE.finditer(code_syntax)}
+    return (tuple(target.split(".")) in calls if "." in target
+            else any(method == target for _, method in calls))
 
 
 def executable_bsl_blocks(response: str) -> list[str]:

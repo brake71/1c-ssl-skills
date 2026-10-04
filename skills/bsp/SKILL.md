@@ -1,6 +1,6 @@
 ---
 name: bsp
-description: "1C:BSP 3.1.11 application development and code review. Use for BSP and its APIs even when the answer seems familiar: common modules, signatures, API regions, background/scheduled jobs, exchange, printing, files, access, upgrades, signatures/powers of attorney, multilingual code, duplicates and reference replacement. Also use for overridable hooks and public/internal/deprecated API choices. Do not use for plain 1C platform syntax unrelated to BSP. Windows: read references with native rg or Python UTF-8 stdout, not PowerShell content cmdlets/pipelines."
+description: "Verified 1C:BSP 3.1.11 APIs and integration workflows. Activate when the task names BSP, a BSP module/subsystem, or asks to select or review BSP APIs: signatures, execution contexts, public/internal/deprecated regions and overridable hooks. Covers jobs, exchange, printing, files, access, upgrades, signatures/powers of attorney, localization, classifiers and reference replacement. Ordinary BSL functions, loops, arrays and platform syntax need no BSP skill when the task requests no library integration. Windows: use native rg or Python UTF-8 stdout to read references."
 ---
 
 # Using 1C:BSP 3.1.11 in application code
@@ -27,6 +27,10 @@ do not combine a safe skill read with an unsafe README read. Do not change
 global shell settings.
 
 ## Workflow
+
+Scope: apply this workflow to BSP integration or API review. Answer standalone
+BSL/platform questions directly when they need no BSP library or subsystem;
+the presence of BSL files alone is not an integration task.
 
 1. Select one primary reference from the task table. Add a second only for a
    genuinely cross-cutting task, such as printing in a background job.
@@ -88,7 +92,7 @@ export path, not a consumer project requirement.
 | Multilingual code, NStr, current language, localization | `references/multilang.md` |
 | Duplicates, bulk modification, subordinate structure, reference replacement | `references/report-dedup.md` |
 
-For an unmapped task, start with `fundamentals.md`. It also lists intentionally
+For an unmapped BSP task, start with `fundamentals.md`. It also lists intentionally
 uncovered subsystems. References are workflows, not just a searchable method
 catalog: use the complete scenario, not an isolated matching name.
 
