@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.
 Чтобы установить конкретный тег или коммит, передайте `--ref`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.12
+curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.13
 ```
 
 Если не хочется выполнять загруженный код через pipe, сначала сохраните и
@@ -59,7 +59,7 @@ irm https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.ps1 -Ou
 .\install.ps1 -Agent Codex
 .\install.ps1 -Agent OpenCode
 .\install.ps1 -Target C:\path\to\skills
-.\install.ps1 -Agent Codex -Ref v0.12
+.\install.ps1 -Agent Codex -Ref v0.13
 Remove-Item .\install.ps1
 ```
 
@@ -173,7 +173,7 @@ smoke и полный RED/GREEN-прогон с `--skill` на **распако�
 отчёта с manifest. PASS другого checkout или старого архива не заменяет эту
 проверку. Сборка и проверки не создают тег и не публикуют релиз.
 
-Результаты и ограничения текущего кандидата v0.13:
+Результаты и ограничения опубликованного выпуска v0.13:
 [проверка готовности](reports/bsp-skills/v0.13-release-readiness.md).
 
 ### Поведенческий RED/GREEN-тест
