@@ -809,7 +809,10 @@ def negative_example_context(context: str, code_syntax: str) -> bool:
         r"(?:очевидн\w*\s+)?(?:пример|код|вариант|вызов|API|реализац|сигнатур)\w*|"
         r"(?:пример|код|вариант|вызов)\w*\s+(?:неверн|ошибочн|неправильн)\w*|"
         r"(?:неверно|ошибочно|неправильно)\s*:\s*$|антипаттерн|нельзя\s+так|"
-        r"\bтак\b[^.\n]{0,40}\bнельзя\b", context, re.I
+        r"\bтак\b[^.\n]{0,40}\bнельзя\b|"
+        r"\bтак(?:ой|ие)\s+(?:код|пример|вызов)\b[^.\n]{0,80}"
+        r"(?:\bнельзя\b|\bне\s+(?:следует|нужно)\b)",
+        context, re.I
     ):
         return True
     if warning_targets_same_call(context, code_syntax):
@@ -818,7 +821,7 @@ def negative_example_context(context: str, code_syntax: str) -> bool:
         return False
     # Unnamed example labels still apply regardless of named references.
     if re.search(
-        r"вызова?\s+вида|\bв\s+частности\b|\bнапример\b|"
+        r"вызова?\s+вида|(?:\bв\s+частности\b|\bнапример\b)\s*[:,]?\s*$|"
         r"\bтаких\s+(?:публичных\s+)?(?:методов|вызовов)\b|"
         r"быть\s+не\s+долж", context, re.I
     ):
@@ -826,6 +829,15 @@ def negative_example_context(context: str, code_syntax: str) -> bool:
     deictic = re.search(r"\bэтот\s+(?:метод|вызов|код|пример)\b", context, re.I)
     if not deictic:
         return False
+    if re.search(r"\bэтот\s+код\b", deictic.group(), re.I):
+        # "This code belongs before writing; don't invoke the procedure again"
+        # warns about a separate action, not about the recommended snippet.
+        scoped = re.sub(
+            r"\bне\s+вызыва\w*\s+процедур\w*\s+повторно\b", "",
+            context, flags=re.I,
+        )
+        if not NEGATIVE_BLOCK_RE.search(scoped):
+            return False
     # "`OtherMethod` returns ...; this method is internal" refers to the
     # named method, not the preceding fence. Resolve only explicit method
     # subjects/labels; an argument name or arbitrary inline code is no evidence.

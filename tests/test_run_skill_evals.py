@@ -567,6 +567,51 @@ class ResponseScoringTests(unittest.TestCase):
                 unsafe = response.replace("СтабильныйМетод();", "СтабильныйМетод();\nТестовыйМодуль.Опечатка();")
                 self.assertFalse(runner.score_response(self.case, unsafe, self.method_index)["passed"])
 
+    def test_post_code_note_about_repeated_validation_does_not_discard_valid_code(self):
+        response = (
+            "Для проверки используйте публичный метод:\n"
+            "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```\n\n"
+            "Метод устанавливает Отказ. Обычно этот код размещают перед записью "
+            "и не вызывают процедуру повторно после неё."
+        )
+        score = runner.score_response(self.case, response, self.method_index)
+        self.assertTrue(score["passed"])
+        self.assertEqual(score["known_module_calls"], ["ТестовыйМодуль.СтабильныйМетод"])
+        unsafe = response.replace(
+            "СтабильныйМетод();", "СтабильныйМетод();\nТестовыйМодуль.Опечатка();"
+        )
+        unsafe_score = runner.score_response(self.case, unsafe, self.method_index)
+        self.assertFalse(unsafe_score["passed"])
+        self.assertEqual(unsafe_score["invalid_methods"], ["ТестовыйМодуль.Опечатка"])
+        for warning in (
+            "Этот код использовать нельзя.",
+            "Этот метод не следует вызывать.",
+            "Например, такой код использовать нельзя.",
+            "Такой пример не следует повторять.",
+            "Такой вызов не нужно использовать.",
+        ):
+            with self.subTest(warning=warning):
+                block = "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```\n\n" + warning
+                self.assertEqual(runner.executable_bsl_blocks(block), [])
+
+    def test_example_of_another_method_or_failure_does_not_discard_public_code(self):
+        block = "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```"
+        notes = (
+            "Нет стабильного серверного метода. Служебные методы, например, "
+            "`ДругойМетод`, не запускают операцию; вызывать такие методы не следует.",
+            "Нельзя скрывать ошибку записи: например, отсутствие прав на каталог. "
+            "Этот вариант не подавляет ошибки.",
+        )
+        for note in notes:
+            with self.subTest(note=note):
+                response = block + "\n\n" + note
+                score = runner.score_response(self.case, response, self.method_index)
+                self.assertTrue(score["passed"])
+                self.assertEqual(score["known_module_calls"], ["ТестовыйМодуль.СтабильныйМетод"])
+                unsafe = response.replace("СтабильныйМетод();", "СтабильныйМетод();\nТестовыйМодуль.Опечатка();")
+                self.assertEqual(runner.score_response(self.case, unsafe, self.method_index)["invalid_methods"],
+                                 ["ТестовыйМодуль.Опечатка"])
+
     def test_unqualified_warning_does_not_hide_invalid_call_in_another_fence(self):
         response = (
             "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```\n\n"
