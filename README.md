@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.
 Чтобы установить конкретный тег или коммит, передайте `--ref`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.13
+curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.14
 ```
 
 Если не хочется выполнять загруженный код через pipe, сначала сохраните и
@@ -59,7 +59,7 @@ irm https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.ps1 -Ou
 .\install.ps1 -Agent Codex
 .\install.ps1 -Agent OpenCode
 .\install.ps1 -Target C:\path\to\skills
-.\install.ps1 -Agent Codex -Ref v0.13
+.\install.ps1 -Agent Codex -Ref v0.14
 Remove-Item .\install.ps1
 ```
 
@@ -156,7 +156,7 @@ Windows, незакоммиченные изменения и Python cache не 
 подготовленное Git-дерево через `--ref`. Тег и сеть для сборки не нужны:
 
 ```bash
-python ci/build_release.py --ref HEAD --version v0.13 --output-dir .tmp/v0.13-candidate
+python ci/build_release.py --ref HEAD --version v0.14 --output-dir .tmp/v0.14-candidate
 ```
 
 Выходной каталог должен быть новым. В нём — ZIP, tar.gz, распакованный
@@ -173,11 +173,7 @@ smoke и полный RED/GREEN-прогон с `--skill` на **распако�
 отчёта с manifest. PASS другого checkout или старого архива не заменяет эту
 проверку. Сборка и проверки не создают тег и не публикуют релиз.
 
-Результаты и ограничения опубликованного выпуска v0.13:
-[проверка готовности](reports/bsp-skills/v0.13-release-readiness.md).
-Следующий локальный кандидат v0.14 **не опубликован**:
-[проверка кандидата](reports/bsp-skills/v0.14-release-candidate-readiness.md).
-Команды установки выше пока указывают на опубликованный v0.13.
+Результаты опубликованного v0.14: [проверка скачанных архивов и релиза](reports/bsp-skills/v0.14-published-verification.md), [качество кандидата и ограничения](reports/bsp-skills/v0.14-release-candidate-readiness.md). История v0.13 — [проверка готовности](reports/bsp-skills/v0.13-release-readiness.md).
 
 ### Поведенческий RED/GREEN-тест
 
@@ -207,7 +203,7 @@ reference-файлам. Это преимущественно guided-корпу�
 # Быстрый прогон одного сценария: без скила и со скилом.
 python ci/run_skill_evals.py --case message-bound-to-field --runs 1
 
-# Полный прогон для стабилизации v0.13: явно фиксируем модель и reasoning effort.
+# Полный прогон: явно фиксируем модель и reasoning effort.
 python ci/run_skill_evals.py --runs 3 --jobs 6 --model gpt-6-luna --reasoning-effort medium
 
 # Возобновляемый прогон с теми же параметрами и фиксированным путём отчёта.
@@ -230,7 +226,7 @@ Fingerprint скила вычисляется по точным байтам и 
 
 `--jobs` задаёт предельное число одновременных запусков `cdx`; значение `6`
 сокращает длительность полного прогона, не меняя число повторов и пороги.
-Модель по умолчанию — `gpt-5.6-luna`. Для стабилизации v0.13 используется
+Модель по умолчанию — `gpt-5.6-luna`. Для проверки v0.14 использовался
 явный `--model gpt-6-luna --reasoning-effort medium`, как в командах выше.
 Результаты разных моделей хранятся раздельно и не объединяются в один gate.
 
