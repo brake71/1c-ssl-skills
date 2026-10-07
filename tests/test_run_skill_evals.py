@@ -83,6 +83,26 @@ class EvalCorpusTests(unittest.TestCase):
         answer = "Доступна документация только 3.1.11; сигнатуру 3.2.1 нужно проверить отдельно."
         self.assertTrue(runner.score_response(version, answer, {})["quality_passed"])
         self.assertFalse(runner.score_response(version, "В БСП 3.2.1 точно такой же метод.", {})["passed"])
+        signature = (
+            "Документация БСП 3.1.11 содержит сигнатуру ниже; "
+            "её применимость к 3.2.1 подтвердить не могу.\n"
+            "```bsl\nОбщегоНазначения.СообщитьПользователю(\n"
+            "    Знач ТекстСообщенияПользователю, Знач КлючДанных = Неопределено) Экспорт\n```"
+        )
+        self.assertTrue(runner.score_response(version, signature, {})["quality_passed"])
+        cannot_confirm = (
+            "По материалам БСП 3.1.11 подтвердить ту же сигнатуру для 3.2.1 нельзя: "
+            "нужна документация нужной версии."
+        )
+        self.assertTrue(runner.score_response(version, cannot_confirm, {})["quality_passed"])
+        self.assertFalse(runner.score_response(
+            version, "По БСП 3.1.11 такую сигнатуру можно подтвердить и для 3.2.1.", {}
+        )["quality_passed"])
+        runnable = signature.replace(
+            "    Знач ТекстСообщенияПользователю, Знач КлючДанных = Неопределено) Экспорт",
+            "    \"Ошибка\", , \"Объект.Организация\");",
+        )
+        self.assertFalse(runner.score_response(version, runnable, {})["quality_passed"])
 
     def test_reference_matrix_rejects_missing_reference_and_unassigned_case(self):
         cases = runner.load_cases(REPO_ROOT / "evals" / "cases.json")
