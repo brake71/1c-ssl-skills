@@ -918,6 +918,32 @@ class CorpusCriteriaTests(unittest.TestCase):
     def case(case_id):
         return next(case for case in runner.load_cases(runner.DEFAULT_CASES) if case.id == case_id)
 
+    def test_scheduled_job_requires_struct_in_code_and_rejects_invented_factory(self):
+        case = self.case("scheduled-job-module-suffix")
+        correct = (
+            "```bsl\n"
+            "ПараметрыЗадания = Новый Структура;\n"
+            "ПараметрыЗадания.Вставить(\"Метаданные\", Метаданные.РегламентныеЗадания.МояЗадача);\n"
+            "Задание = РегламентныеЗаданияСервер.ДобавитьЗадание(ПараметрыЗадания);\n"
+            "```"
+        )
+        self.assertTrue(runner.score_response(case, correct, {})["passed"])
+        invented = correct.replace(
+            "ПараметрыЗадания = Новый Структура;",
+            "ПараметрыЗадания = РегламентныеЗаданияСервер.ПараметрыДобавленияЗадания();",
+        )
+        prose_only = "ПараметрыЗадания = Новый Структура — вариант из справки.\n" + invented
+        self.assertFalse(runner.score_response(case, prose_only, {})["passed"])
+        application = correct.replace(
+            "```bsl\n", "```bsl\nМоиРегламентныеЗадания.ПодготовитьМетаданные();\n"
+        )
+        self.assertTrue(runner.score_response(case, application, {})["passed"])
+        warning = correct + (
+            "\nРегламентныеЗаданияСервер.ПараметрыДобавленияЗадания() "
+            "не существует в БСП 3.1.11."
+        )
+        self.assertTrue(runner.score_response(case, warning, {})["passed"])
+
     def test_lock_form_rejects_absent_bsp_module_without_blocking_application_modules(self):
         case = self.case("lock-form-fields")
         correct = (
