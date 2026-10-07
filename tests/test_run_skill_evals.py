@@ -52,6 +52,31 @@ class EvalCorpusTests(unittest.TestCase):
         )
         self.assertEqual(unscoped, ["plain-bsl-no-bsp"])
 
+    def test_activation_corpus_has_independent_matrix_and_boundary_expectations(self):
+        cases = runner.load_cases(REPO_ROOT / "evals" / "activation-cases.json")
+        references, unscoped = runner.load_reference_matrix(
+            REPO_ROOT / "evals" / "activation-reference-matrix.json"
+        )
+        runner.validate_reference_matrix(cases, references, unscoped, SKILL_DIR / "references")
+        self.assertEqual(len(cases), 6)
+        self.assertEqual(sum(not c.should_trigger for c in cases), 3)
+        self.assertEqual(len(unscoped), 4)
+        self.assertIsNone(next(c.reference for c in cases if c.id == "other-version-api-boundary"))
+        for case in cases:
+            if case.id != "other-version-api-boundary":
+                self.assertNotIn("БСП 3.1.11", case.task)
+        names = {case.id: case for case in cases}
+        platform = names["neutral-platform-exchange-registration"]
+        response = "```bsl\nПланыОбмена[ИмяПлана].ЗарегистрироватьИзменения(Узел, ДокументСсылка);\n```"
+        self.assertTrue(runner.score_response(platform, response, {})["passed"])
+        self.assertFalse(runner.score_response(
+            platform, response, {}, skill_activated=True, require_activation=True
+        )["passed"])
+        version = names["other-version-api-boundary"]
+        answer = "Доступна документация только 3.1.11; сигнатуру 3.2.1 нужно проверить отдельно."
+        self.assertTrue(runner.score_response(version, answer, {})["quality_passed"])
+        self.assertFalse(runner.score_response(version, "В БСП 3.2.1 точно такой же метод.", {})["passed"])
+
     def test_reference_matrix_rejects_missing_reference_and_unassigned_case(self):
         cases = runner.load_cases(REPO_ROOT / "evals" / "cases.json")
         references, unscoped = runner.load_reference_matrix(
