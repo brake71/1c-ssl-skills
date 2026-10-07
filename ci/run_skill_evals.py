@@ -858,7 +858,8 @@ def negative_example_context(context: str, code_syntax: str) -> bool:
 def suffix_warning_subject(context: str, code_syntax: str) -> str | None:
     """Resolve a warning's first named subject against calls in the prior fence."""
     subject = re.match(
-        r"^\s*(?:(?:ложн|ошибочн|неверн)\w*(?:\s+\w+){0,3}\s*[—:-]\s*)?"
+        r"^\s*(?:\*\*Не перепутайте:\*\*\s*)?"
+        r"(?:(?:ложн|ошибочн|неверн)\w*(?:\s+\w+){0,3}\s*[—:-]\s*)?"
         r"`(?P<module>[A-Za-zА-Яа-яЁё_][\w]*)(?:\.(?P<method>[A-Za-zА-Яа-яЁё_][\w]*)"
         r"(?:\([^`]*\))?)?`",
         context, re.I,

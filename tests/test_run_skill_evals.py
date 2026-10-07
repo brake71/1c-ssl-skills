@@ -649,6 +649,8 @@ class ResponseScoringTests(unittest.TestCase):
         for warning in (
             "Ложный очевидный вариант — `ДругойМодуль.СтабильныйМетод(...)`: "
             "такого метода БСП нет. Пользуйтесь платформенным API.",
+            "**Не перепутайте:** `ДругойМодуль.СтабильныйМетод(...)` — "
+            "ложный очевидный API; используйте платформенный метод.",
             "`ТестовыйМодуль.СтабильныйМетод` — стабильный публичный API БСП 3.1.11. "
             "Вызов `ДругойМодуль.СтабильныйМетод` из прикладного кода использовать "
             "не следует: это служебный модуль.",
@@ -668,6 +670,8 @@ class ResponseScoringTests(unittest.TestCase):
         for warning in (
             "Ложный очевидный вариант — `ТестовыйМодуль.СтабильныйМетод(...)`: "
             "этот метод использовать нельзя.",
+            "**Не перепутайте:** `ТестовыйМодуль.СтабильныйМетод(...)` — "
+            "ложный API, так вызывать нельзя.",
             "`ТестовыйМодуль` — служебный модуль. Его методы вызывать не следует.",
         ):
             with self.subTest(warning=warning):
@@ -1051,6 +1055,33 @@ class CorpusCriteriaTests(unittest.TestCase):
             '    Возврат Реквизиты;',
         )
         self.assertTrue(runner.score_response(case, correct, {})["passed"])
+
+    def test_attached_file_accepts_guard_for_empty_binary_without_inverting_guard(self):
+        case = self.case("save-attached-file-public-boundary")
+        prefix = "Служебный метод вызывать из прикладного кода не следует.\n"
+        code = '''```bsl
+ДвоичныеДанные = РаботаСФайлами.ДвоичныеДанныеФайла(Файл, Ложь);
+Если Не ЗначениеЗаполнено(ДвоичныеДанные) Тогда
+    Возврат;
+КонецЕсли;
+ДвоичныеДанные.Записать(ПутьНаСервере);
+```'''
+        self.assertTrue(runner.score_response(case, prefix + code, {})["passed"])
+        self.assertFalse(runner.score_response(
+            case, prefix + code.replace("Если Не ЗначениеЗаполнено", "Если ЗначениеЗаполнено"), {}
+        )["passed"])
+        wrong_arg = code.replace("ДвоичныеДанныеФайла(Файл, Ложь)", "ДвоичныеДанныеФайла(Файл)")
+        self.assertFalse(runner.score_response(case, prefix + wrong_arg, {})["passed"])
+        named = code.replace("ДвоичныеДанные =", "ДанныеФайла =")
+        named = named.replace("ЗначениеЗаполнено(ДвоичныеДанные)", "ЗначениеЗаполнено(ДанныеФайла)")
+        named = named.replace("ДвоичныеДанные.Записать", "ДанныеФайла.Записать")
+        named = named.replace("Если Не ЗначениеЗаполнено(ДанныеФайла) Тогда",
+                              "Если ДанныеФайла = Неопределено Тогда")
+        self.assertTrue(runner.score_response(case, prefix + named, {})["passed"])
+        self.assertFalse(runner.score_response(
+            case, prefix + named.replace("ДанныеФайла = Неопределено",
+                                         "ДанныеФайла <> Неопределено"), {}
+        )["passed"])
 
     def test_safe_write_accepts_equivalent_module_correction(self):
         case = self.case("update-safe-write-module-name")
