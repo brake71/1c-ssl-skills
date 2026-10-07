@@ -1058,6 +1058,28 @@ class CorpusCriteriaTests(unittest.TestCase):
             )
             self.assertTrue(runner.score_response(fundamental, variant, {})["passed"])
 
+    def test_destruction_date_accepts_equivalent_early_return_not_inverted_result(self):
+        case = self.case("pd-destruction-date-public-boundary")
+        prefix = "Служебный метод возвращает плановый срок хранения, не дату факта.\n"
+        code = '''```bsl
+&НаСервере
+Функция ДатаУничтоженияСубъекта(Субъект)
+    ДатаУничтожения = ЗащитаПерсональныхДанных.ДатаУничтоженияДанныхСубъекта(Субъект);
+    Если ДатаУничтожения = Дата(1, 1, 1) Тогда
+        Возврат Неопределено; // записи нет
+    КонецЕсли;
+    Возврат ДатаУничтожения;
+КонецФункции
+```'''
+        self.assertTrue(runner.score_response(case, prefix + code, {})["passed"])
+        wrong = code.replace("Возврат Неопределено;", "Возврат ДатаУничтожения;")
+        wrong = wrong.replace("КонецЕсли;\n    Возврат ДатаУничтожения;",
+                              "КонецЕсли;\n    Возврат Неопределено;")
+        self.assertIn("КонецЕсли;\n    Возврат Неопределено;", wrong)
+        self.assertFalse(runner.score_response(case, prefix + wrong, {})["passed"])
+        prose_only = prefix + "ДатаУничтожения <> Дата(1, 1, 1)\n" + wrong
+        self.assertFalse(runner.score_response(case, prose_only, {})["passed"])
+
     def test_hook_warning_accepts_reverse_word_order_without_allowing_direct_call(self):
         case = self.case("connected-command-hook-boundary")
         frame = '''ПодключаемыеКомандыПереопределяемый:\n```bsl
@@ -1205,6 +1227,26 @@ class CorpusCriteriaTests(unittest.TestCase):
             with self.subTest(warning=warning):
                 self.assertTrue(runner.score_response(case, warning + code, {})["passed"])
 
+    def test_classifier_absent_method_accepts_natural_denial_not_positive_claim(self):
+        case = self.case("classifiers-update-public-boundary")
+        code = ('\n```bsl\nРезультат = РаботаСКлассификаторами.'
+                'ОбновитьКлассификаторы(Идентификаторы);\n'
+                'Сообщить(Результат.КодОшибки);\n```')
+        actual = (
+            "Совет вызвать РаботаСКлассификаторамиВызовСервера."
+            "ОбновитьКлассификаторы(Идентификаторы) неверен: такого метода "
+            "в этом модуле БСП 3.1.11 нет."
+        )
+        self.assertTrue(runner.score_response(case, actual + code, {})["passed"])
+        wrong = actual.replace("такого метода в этом модуле БСП 3.1.11 нет",
+                               "такой метод в этом модуле БСП 3.1.11 есть")
+        self.assertFalse(runner.score_response(case, wrong + code, {})["passed"])
+        unrelated = (
+            "РаботаСКлассификаторамиВызовСервера — публичный метод; "
+            "в другом модуле такого метода нет."
+        )
+        self.assertFalse(runner.score_response(case, unrelated + code, {})["passed"])
+
     def test_error_policy_keeps_fences_branches_and_effect_locations_independent(self):
         rule = self.case("classifiers-update-public-boundary").error_handling_rule
         source = "Результат = РаботаСКлассификаторами.ОбновитьКлассификаторы(Идентификаторы);\n"
@@ -1242,6 +1284,20 @@ class CorpusCriteriaTests(unittest.TestCase):
         self.assertFalse(runner.error_handling_rule_satisfied([source +
             ("Если Не ПустаяСтрока(Результат.КодОшибки) Тогда\n" * 40) +
             "Сообщить(Результат.КодОшибки);\n" + ("КонецЕсли;\n" * 40)], rule))
+
+    def test_fundamentals_accepts_server_execution_without_client_only_claim(self):
+        case = self.case("fundamentals-module-and-api-boundaries")
+        text = '''ОбщегоНазначения — сервер; ОбщегоНазначенияКлиент — клиент.
+ОбщегоНазначенияКлиентСервер — общие алгоритмы без обращения к БД.
+Модуль ОбщегоНазначенияВызовСервера тоже исполняется на сервере: клиент инициирует вызов.
+ОбщегоНазначенияСлужебный не существует; есть ОбщегоНазначенияСлужебныйКлиентСервер.
+ПрограммныйИнтерфейс — публичный; СлужебныйПрограммныйИнтерфейс — служебный;
+УстаревшиеПроцедурыИФункции — устаревший.
+Для служебных методов обратная совместимость не гарантируется.'''
+        self.assertTrue(runner.score_response(case, text, {})["passed"])
+        client_only = text.replace("тоже исполняется на сервере",
+                                   "не исполняется на сервере, это клиентский модуль")
+        self.assertFalse(runner.score_response(case, client_only, {})["passed"])
 
     def test_fundamentals_requires_server_context_for_server_call_module(self):
         case = self.case("fundamentals-module-and-api-boundaries")
