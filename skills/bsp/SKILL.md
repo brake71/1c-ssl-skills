@@ -37,7 +37,10 @@ the presence of BSL files alone is not an integration task.
 2. Open the selected reference before answering; the router and remembered
    platform knowledge are insufficient. Locate the scenario using `rg -n`
    headings/keywords, then read its rules, signature, example and pitfalls
-   with native rg context options or Python. This step is complete when the
+   with native rg context options or Python. If a read fails, retry the
+   absolute reference path built from the `SKILL.md` path you just opened,
+   not another skill directory. If still unreadable, state that the BSP call
+   is unverified instead of guessing it. This step is complete when the
    proposed answer is checked against that section. Read the whole file only
    if section reading is unavailable; avoid unrelated material.
 3. If the user proposes a call or rule, check its original full `Module.Method`

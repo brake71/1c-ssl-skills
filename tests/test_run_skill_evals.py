@@ -918,6 +918,53 @@ class CorpusCriteriaTests(unittest.TestCase):
     def case(case_id):
         return next(case for case in runner.load_cases(runner.DEFAULT_CASES) if case.id == case_id)
 
+    def test_lock_form_rejects_absent_bsp_module_without_blocking_application_modules(self):
+        case = self.case("lock-form-fields")
+        correct = (
+            "```bsl\n"
+            "ЗапретРедактированияРеквизитовОбъектов.ЗаблокироватьРеквизиты(ЭтаФорма);\n"
+            "ЗапретРедактированияРеквизитовОбъектовКлиент."
+            "РазрешитьРедактированиеРеквизитовОбъекта(ЭтаФорма);\n"
+            "```"
+        )
+        self.assertTrue(runner.score_response(case, correct, {})["passed"])
+        invented = correct.replace(
+            "```bsl\n",
+            "```bsl\nУправлениеБлокировкойРеквизитовФормыКлиентСервер."
+            "ОчиститьБлокировкуРеквизитовФормы(ЭтаФорма);\n",
+        )
+        invented_score = runner.score_response(case, invented, {})
+        self.assertFalse(invented_score["passed"])
+        self.assertTrue(invented_score["forbidden_hits"])
+        application = correct.replace(
+            "```bsl\n", "```bsl\nОбработчикиЗаказовКлиент.ОбновитьФорму(ЭтаФорма);\n"
+        )
+        self.assertTrue(runner.score_response(case, application, {})["passed"])
+        warning = correct + "\nМодуля УправлениеБлокировкойРеквизитовФормыКлиентСервер нет в БСП."
+        self.assertTrue(runner.score_response(case, warning, {})["passed"])
+
+    def test_lock_form_rejects_array_constructor_with_string_elements(self):
+        case = self.case("lock-form-fields")
+        response = (
+            "```bsl\n"
+            "Функция ПолучитьБлокируемыеРеквизитыОбъекта() Экспорт\n"
+            "    Возврат Новый Массив(\"Валюта\", \"Организация\");\n"
+            "КонецФункции\n"
+            "ЗапретРедактированияРеквизитовОбъектов.ЗаблокироватьРеквизиты(ЭтаФорма);\n"
+            "ЗапретРедактированияРеквизитовОбъектовКлиент."
+            "РазрешитьРедактированиеРеквизитовОбъекта(ЭтаФорма);\n"
+            "```"
+        )
+        self.assertFalse(runner.score_response(case, response, {})["passed"])
+        correct = response.replace(
+            'Возврат Новый Массив("Валюта", "Организация");',
+            'Реквизиты = Новый Массив;\n'
+            '    Реквизиты.Добавить("Валюта");\n'
+            '    Реквизиты.Добавить("Организация");\n'
+            '    Возврат Реквизиты;',
+        )
+        self.assertTrue(runner.score_response(case, correct, {})["passed"])
+
     def test_safe_write_accepts_equivalent_module_correction(self):
         case = self.case("update-safe-write-module-name")
         response = (
