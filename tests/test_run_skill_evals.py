@@ -612,6 +612,35 @@ class ResponseScoringTests(unittest.TestCase):
                 self.assertEqual(runner.score_response(self.case, unsafe, self.method_index)["invalid_methods"],
                                  ["ТестовыйМодуль.Опечатка"])
 
+    def test_warning_after_code_about_other_module_does_not_hide_recommendation(self):
+        block = "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```"
+        for warning in (
+            "Ложный очевидный вариант — `ДругойМодуль.СтабильныйМетод(...)`: "
+            "такого метода БСП нет. Пользуйтесь платформенным API.",
+            "`ТестовыйМодуль.СтабильныйМетод` — стабильный публичный API БСП 3.1.11. "
+            "Вызов `ДругойМодуль.СтабильныйМетод` из прикладного кода использовать "
+            "не следует: это служебный модуль.",
+            "`ДругойМодуль` — служебный модуль для серверных вызовов с клиента. "
+            "Его одноимённый метод не является стабильным прикладным API, и "
+            "обратная совместимость для таких методов не гарантируется. "
+            "В серверном контексте используйте `ТестовыйМодуль.СтабильныйМетод`. "
+            "Результат готов.",
+        ):
+            response = block + "\n\n" + warning
+            with self.subTest(warning=warning):
+                self.assertTrue(runner.score_response(self.case, response, self.method_index)["passed"])
+                self.assertEqual(runner.executable_bsl_blocks(response), ["ТестовыйМодуль.СтабильныйМетод();\n"])
+                invented = response.replace("СтабильныйМетод();", "СтабильныйМетод();\nТестовыйМодуль.Опечатка();")
+                self.assertEqual(runner.score_response(self.case, invented, self.method_index)["invalid_methods"],
+                                 ["ТестовыйМодуль.Опечатка"])
+        for warning in (
+            "Ложный очевидный вариант — `ТестовыйМодуль.СтабильныйМетод(...)`: "
+            "этот метод использовать нельзя.",
+            "`ТестовыйМодуль` — служебный модуль. Его методы вызывать не следует.",
+        ):
+            with self.subTest(warning=warning):
+                self.assertEqual(runner.executable_bsl_blocks(block + "\n\n" + warning), [])
+
     def test_unqualified_warning_does_not_hide_invalid_call_in_another_fence(self):
         response = (
             "```bsl\nТестовыйМодуль.СтабильныйМетод();\n```\n\n"

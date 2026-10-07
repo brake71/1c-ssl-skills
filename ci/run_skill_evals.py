@@ -855,6 +855,42 @@ def negative_example_context(context: str, code_syntax: str) -> bool:
             else any(method == target for _, method in calls))
 
 
+def suffix_warning_subject(context: str, code_syntax: str) -> str | None:
+    """Resolve a warning's first named subject against calls in the prior fence."""
+    subject = re.match(
+        r"^\s*(?:(?:ложн|ошибочн|неверн)\w*(?:\s+\w+){0,3}\s*[—:-]\s*)?"
+        r"`(?P<module>[A-Za-zА-Яа-яЁё_][\w]*)(?:\.(?P<method>[A-Za-zА-Яа-яЁё_][\w]*)"
+        r"(?:\([^`]*\))?)?`",
+        context, re.I,
+    )
+    if subject is None:
+        return None
+    first_sentence = re.split(r"(?<=[.!?])\s+", context, maxsplit=1)[0]
+    if not (NEGATIVE_BLOCK_RE.search(first_sentence)
+            or re.search(r"\bслужебн\w*\b", first_sentence, re.I)):
+        return None
+    calls = {
+        (call.group("module").lower(), call.group("method").lower())
+        for call in CALL_RE.finditer(code_syntax)
+    }
+    # Platform managers can be indexed before calling a method.
+    calls.update(
+        (call.group("module").lower(), call.group("method").lower())
+        for call in re.finditer(
+            r"(?<![\w.])(?P<module>[A-Za-zА-Яа-яЁё_]\w*)\s*"
+            r"\[[^\]\r\n]{1,120}\]\s*\.\s*(?P<method>[A-Za-zА-Яа-яЁё_]\w*)\s*\(",
+            code_syntax,
+        )
+    )
+    if not calls:
+        return None
+    module = subject.group("module").lower()
+    method = subject.group("method")
+    if any(name == module and (method is None or call == method.lower()) for name, call in calls):
+        return "same"
+    return "other"
+
+
 def executable_bsl_blocks(response: str) -> list[str]:
     """Exclude fenced snippets explicitly presented as incorrect examples."""
     matches = list(BSL_FENCE_RE.finditer(response))
@@ -880,6 +916,11 @@ def executable_bsl_blocks(response: str) -> list[str]:
         )
         code_syntax = bsl_code_views(code)[1]
         suffix_negative = negative_example_context(immediate_suffix, code_syntax)
+        subject = suffix_warning_subject(immediate_suffix, code_syntax)
+        if subject == "same":
+            suffix_negative = True
+        elif subject == "other" and not warning_targets_same_call(immediate_suffix, code_syntax):
+            suffix_negative = False
         if (index + 1 < len(matches) and immediate_suffix.rstrip().endswith(":")
                 and immediate_suffix.strip() in response[match.end():matches[index + 1].start()]):
             # A heading introducing the next fence does not label this one.
