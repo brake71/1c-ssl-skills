@@ -1,6 +1,6 @@
 ---
 name: bsp
-description: "Verified 1C:BSP 3.1.11 APIs and integration workflows. Activate when the task names BSP, a BSP module/subsystem, or asks to select or review BSP APIs: signatures, execution contexts, public/internal/deprecated regions and overridable hooks. Covers jobs, exchange, printing, files, access, upgrades, signatures/powers of attorney, localization, classifiers and reference replacement. Ordinary BSL functions, loops, arrays and platform syntax need no BSP skill when the task requests no library integration. Windows: use native rg or Python UTF-8 stdout to read references."
+description: "Verified 1C:BSP 3.1.11 APIs and integration workflows. Activate for BSP module/API selection or standard-subsystem integration, including form-field validation messages and safe upgrade writes. Covers jobs, exchange, printing, files, access, upgrades, signatures, localization and classifiers. Native platform plan-of-exchange manager registration, ordinary BSL functions and form-element property edits without BSP integration do not need this skill. When asked about another BSP version, use it only to state the 3.1.11 boundary, not to transfer unverified signatures. Windows: use native rg or Python UTF-8 stdout to read references."
 ---
 
 # Using 1C:BSP 3.1.11 in application code
@@ -30,7 +30,8 @@ global shell settings.
 
 Scope: apply this workflow to BSP integration or API review. Answer standalone
 BSL/platform questions directly when they need no BSP library or subsystem;
-the presence of BSL files alone is not an integration task.
+native plan-of-exchange manager change registration is platform-only. The
+presence of BSL files or a form element alone is not an integration task.
 
 1. Select one primary reference from the task table. Add a second only for a
    genuinely cross-cutting task, such as printing in a background job.
@@ -43,9 +44,11 @@ the presence of BSL files alone is not an integration task.
    is unverified instead of guessing it. This step is complete when the
    proposed answer is checked against that section. Read the whole file only
    if section reading is unavailable; avoid unrelated material.
-3. If the user proposes a call or rule, check its original full `Module.Method`
-   name and purpose. Explicitly identify any mismatch: a corrected example
-   does not make the original advice correct.
+3. If the user asks about another BSP version, state that 3.1.11 references
+   cannot verify it; request that version's documentation/export and do not
+   show a runnable 3.1.11 signature as if it applied to that version. If the
+   user proposes a call or rule, check its original full `Module.Method` name
+   and purpose. Identify mismatches explicitly.
 4. Prefer the stable public programmatic-interface region. Internal or
    deprecated APIs require an explicit warning and no public alternative.
    Show overridable-module hooks as implementations: BSP calls them;

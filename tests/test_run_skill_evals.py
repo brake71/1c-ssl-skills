@@ -66,6 +66,13 @@ class EvalCorpusTests(unittest.TestCase):
             if case.id != "other-version-api-boundary":
                 self.assertNotIn("БСП 3.1.11", case.task)
         names = {case.id: case for case in cases}
+        message = names["neutral-message-near-field"]
+        keyed = ('```bsl\nОтказ = Истина;\nОбщегоНазначения.СообщитьПользователю('
+                 '"Заполните организацию", Объект, "Организация");\n```')
+        self.assertTrue(runner.score_response(message, keyed, {})["quality_passed"])
+        self.assertFalse(runner.score_response(
+            message, keyed.replace('"Организация"', '"Контрагент"'), {}
+        )["quality_passed"])
         platform = names["neutral-platform-exchange-registration"]
         response = "```bsl\nПланыОбмена[ИмяПлана].ЗарегистрироватьИзменения(Узел, ДокументСсылка);\n```"
         self.assertTrue(runner.score_response(platform, response, {})["passed"])
