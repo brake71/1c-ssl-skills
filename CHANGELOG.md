@@ -18,7 +18,10 @@
   proxy endpoint-настроек без credentials; отдельно подтверждён `account/read`.
   Authenticated post-cleanup контроль теперь проверяет ту же identity;
   stale PASS gates очищаются при resume. Исходный FAIL сохранён, пороги не
-  снижались. [История итераций](reports/bsp-skills/p0-native-runtime-loop-after-v0.14.md).
+  снижались. После коммита `59653f4` повторный native smoke: RED 1/1,
+  GREEN 1/1, isolation/quality gate PASS, infra 0. Resume в новом disposable
+  home тоже PASS без новых model turns. 161 unit-тест PASS; полный новый
+  baseline ещё требуется. [История итераций](reports/bsp-skills/p0-native-runtime-loop-after-v0.14.md).
 
 ## 2026-10-08 — native preflight P0 (не выпущено)
 

@@ -10,6 +10,8 @@
 |---|---|---|---|
 | 0 | `926fa24` | Native preflight без модели | PASS положительной пробы, корректный отказ постороннему проектному скилу |
 | 1 | `f32469a` | `message-bound-to-field`, RED/GREEN 1×, native | INFRA FAIL до model turn: обе фазы отклонили `account/read`; model tokens 0 |
+| 2 | `59653f4` | Новый RED/GREEN smoke 1× | RED 1/1, GREEN 1/1; isolation и общий gate PASS, infra 0 |
+| 2 resume | `59653f4` | Тот же отчёт, новый disposable home | PASS без новых model turns; сохранённые receipts и restored control совпали |
 
 Исходный FAIL не переписан: `.tmp/native-runtime-message-r1.json` и соседние
 artifacts. На каждый model run отдельный app-server, protected disposable
@@ -36,8 +38,23 @@ post-cleanup контроля: unauthenticated restored snapshot мог совп
 RED/GREEN runs. Missing/restored identity даёт отказ. При resume старые PASS
 gates очищаются до начала новой проверки; complete=False сохраняется сразу.
 
-Исправления покрыты регрессиями; повторный model smoke будет выполнен после
-коммита исправления, в новом отчёте `.tmp/native-runtime-message-r2.json`.
+Исправления покрыты регрессиями; **161 unit-тест PASS**. Повторный smoke после
+коммита исправления сохранён в `.tmp/native-runtime-message-r2.json`: GREEN
+активировал скил и прочёл reference (1/1), invalid/unsafe/forbidden/infra 0.
+До/после turn inventories совпали; actual model `gpt-6-luna`, effort medium,
+read-only/never подтверждены native thread profile. RED ответил правильно без
+скила: этот smoke не доказывает прироста качества, только работоспособность
+нового transport и наблюдаемую изоляцию в одном сценарии.
+
+В RED receipt связаны PID `8076`, thread `01a11ab4-0136-70f3-b1e8-d413fac12008`,
+turn `01a11ab4-014a-7ab0-8153-5e9c1fd13cf6`; в GREEN — PID `29156`, thread
+`01a11ab4-55a8-7c91-8bad-f20477cd1c7f`, turn `01a11ab4-55c3-7ff3-bb16-4198aca8c4bf`.
+Исходный auth.json снова проверен неизменным. Resume на той же ревизии сохранил
+оба завершённых run и прошёл post-cleanup проверку в новом disposable home;
+модель повторно не вызывалась. Это не новый независимый behavioral PASS.
+
+Следующая проверка — smoke 3×, затем полный native baseline (27 × 3 в каждой
+фазе). Результаты разных профилей/корпусов не объединяются.
 
 ## Что связывается с модельным запуском
 
