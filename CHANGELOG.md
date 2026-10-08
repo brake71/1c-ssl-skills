@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-08 — native preflight P0 (не выпущено)
+
+- Добавлен `ci/probe_eval_isolation.py`: native snapshots каталога скилов,
+  effective config и thread permissions в RED/GREEN и после cleanup;
+  разрешено только добавление staged `bsp` с проверенными байтами.
+- Проба не вызывает модель, использует disposable credential-free
+  `CODEX_HOME`, отключённые plugins/apps/hooks/memories и allowlist
+  системного environment без parent credentials/integration tokens.
+- Положительная native-проба PASS; посторонний проектный скил корректно
+  остановил отрицательный контроль до staging. 137 unit-тестов PASS,
+  API 664/664, semantic 0 ERROR / 0 WARN, оба eval dry-run PASS.
+- План актуализирован после v0.14. **P0 остаётся открытым**: отдельный
+  app-server preflight не является inventory actual `exec`-процессов,
+  behavioral baseline или новым доказательством для старых релизов.
+  [Отчёт и следующий шаг](reports/bsp-skills/p0-native-preflight-after-v0.14.md).
+
 ## 2026-10-07 — v0.14 (опубликован)
 
 - Уточнены границы выбора скила для прикладных задач, обычного BSL и платформенной

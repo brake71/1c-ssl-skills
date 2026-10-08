@@ -275,6 +275,34 @@ restricted token: до прогона нужно проверить реальн
 служебного API и модулей `*Переопределяемый`, запрещённые антипаттерны и расход
 токенов. Ненулевой код означает, что GREEN не достиг заданных порогов.
 
+### Native preflight изоляции (без вызова модели)
+
+Для отдельного потребительского **Git-корня вне этого репозитория** можно
+сравнить native-каталоги RED/GREEN и проверить возврат к RED после cleanup:
+
+```bash
+python ci/probe_eval_isolation.py --dir /path/to/consumer --model gpt-6-luna --reasoning-effort medium --output .tmp/native-preflight.json
+```
+
+Требуется Codex с native `skills/list`, `config/read`, `plugin/list` и
+`thread/start` (проверено на CLI 0.160.0). Путь отчёта должен быть новым и вне
+consumer-корня. Существующий staged `bsp` и связанные `.agents/skills` не
+перезаписываются. Посторонние проектные скилы, ошибки discovery, изменение
+прочих скилов/конфигурации или неверные байты staged `bsp` дают отказ.
+
+Аудит использует временный **credential-free `CODEX_HOME`**, отключает
+plugins/apps/hooks/memories, не копирует credentials и не запускает model
+turns. Передаётся только allowlist системных переменных/путей, без API keys,
+provider overrides и integration tokens из parent environment.
+Одинаковые user/system-скилы могут оставаться в native-каталоге;
+чистый `CODEX_HOME` не означает пустой каталог. В отчёт входят metadata/content
+fingerprints, но не raw config и не credentials.
+
+**Это отдельный app-server профиль, не inventory реальных `exec`-запусков.**
+PASS preflight не закрывает P0, не является behavioral gate и не усиливает
+результаты прежних релизов. Следующий шаг — inventory в том же процессе,
+который выполняет поведенческий turn. [Результат и ограничения пробы](reports/bsp-skills/p0-native-preflight-after-v0.14.md).
+
 ## Лицензия
 
 [MIT](LICENSE). Copyright (c) 2026 Чекменев Дмитрий Алексеевич.
