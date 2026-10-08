@@ -79,8 +79,63 @@ exchange task два ответа лишний раз читали router, по�
 регистрацию обмена в начале scope, без общей перечисленной возможности
 «exchange», конфликтовавшей с отрицательным task. Проверки снова PASS.
 
-Далее свежие activation 3× и guided baseline на неизменном commit.
+Коммит `57baf94`: свежий activation
+`.tmp/native-activation-after-p2-r2-3x.json` — 5/6 majority, 14/18 individual,
+но общий gate FAIL: activation 2/3, read 1/2, invalid 1, unsafe 1. Isolation
+PASS, infra 0. Все три platform-only negatives теперь 3/3 PASS без активации,
+но field-validation positive 0/3 читает skill; поэтому guided full не запускался.
+Версионный boundary 2/3 PASS, upgrade 3/3 PASS. Исходный auth неизменён.
+
+Следующая контролируемая гипотеза — русские metadata triggers для русских
+задач с неявным названием стандартных подсистем. Description JSON-escaped
+в double-quoted YAML сохраняет ASCII router; native skills/list должен
+подтвердить декодирование до модельного прогона. Сигнатуры/имена API в
+metadata не добавляются. После коммита — свежие activation и guided на
+неизменном коде; неуспешные выборки остаются в истории.
 Результаты разных корпусов и старого/нового scorer не объединяются.
+
+## Итог на `181e0f6`
+
+Native skills/list подтвердил **точное декодирование** русского description;
+SKILL.md сохранил ASCII. Сигнатуры/references и глобальные настройки не менялись.
+
+| Отдельный corpus | GREEN majority | Individual | Активация / reference по majority | Gate / isolation |
+|---|---:|---:|---|---|
+| Guided 27 × 3 | 27/27 | 80/81 | 26/26 / 26/26 | PASS / PASS |
+| Activation 6 × 3 | 5/6 | 16/18 | 3/3 / 2/2 | PASS / PASS |
+
+Отчёты: `.tmp/native-guided-after-p2-r1-3x.json` и
+`.tmp/native-activation-after-p2-r3-3x.json`. Ни один quality failure не был
+пересэмплирован через resume. В обоих GREEN invalid/unsafe/forbidden **БСП**
+и infrastructure errors 0. В отрицательных activation cases ложных активаций
+**0/9**; это наблюдение этого набора, не универсальная гарантия.
+
+Оставшиеся **реальные** quality failures сохранены:
+
+- `neutral-platform-exchange-registration` #2/#3: вместо регистрации
+  показан `ПланыОбмена.ЗаписатьИзменения`. Required pattern верного
+  механизма не выполнен. Это платформенная задача вне BSP scope, поэтому
+  injecting её ответ в BSP metadata или принудительная активация скила
+  исказили бы проверку. Содержание двух ответов FAIL, граница активации PASS.
+- `connected-command-hook-boundary` #2: модель заявила недоступность справки,
+  отказалась от каркаса и попросила выгрузку. Reference-read marker сам по
+  себе не гарантирует использования сценария. Missing code requirements
+  сохраняют FAIL; один успех majority не превращает этот ответ в верный.
+
+Продолжение: отдельно проверить нормализацию reader evidence/ошибочных путей
+на сохранённой trace и устойчивость доступа к reference. Платформенные
+ошибки рассматривать вне skill API или в отдельном platform корпусе.
+P1-покрытие activation остаётся 2/24 reference, расширение не выполнено.
+
+Parent повторно сверил fingerprints runner/helpers/skill/corpus со свежими
+отчётами. **168 unit tests PASS**, coverage 664/664, semantic 0 ERROR / 0 WARN,
+оба dry-run и py_compile/git diff check PASS. Source auth неизменён по
+before/after in-memory checks; scan известных credentials по 794 итоговым
+report/artifact файлам PASS; staging удалён, private runtime homes осталось 0.
+Это не полный аудит неизвестных секретов/внешнего провайдера.
+
+Последний коммит skill: `181e0f6`. Документация результатов коммитится отдельно;
+никакого push, релиза или обновления пользовательского vendor submodule.
 
 ```mermaid
 flowchart TD

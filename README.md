@@ -315,6 +315,13 @@ bootstrap сериализован до пула: без этого паралл
 `exec` и native activation corpus этим результатом не проверены.
 [История commit/run/fix/rerun](reports/bsp-skills/p0-native-runtime-loop-after-v0.14.md).
 
+После P2-калибровки evaluator и metadata выполнены **отдельные свежие** native
+прогоны: guided **27/27 majority, 80/81 individual**, activation **5/6,
+16/18**; оба gate PASS в обоих корпусах. False activation отрицательных задач
+0/9; три настоящих quality failures сохранены, не объявлены исправленными.
+Исторические отчёты не пересчитаны задним числом. Эти изменения не выпущены.
+[Разбор и проверки P2](reports/bsp-skills/p2-scoring-and-native-activation-after-v0.14.md).
+
 ### Native preflight изоляции (без вызова модели)
 
 Для отдельного потребительского **Git-корня вне этого репозитория** можно

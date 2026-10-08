@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-08 — scoring и native activation P2 (не выпущено)
+
+- Четыре сохранённых GREEN false negatives воспроизведены и исправлены:
+  локальные отрицания про другой метод/аргументы больше не скрывают
+  рекомендуемый BSL; равнозначные «неправильно» и латинское BSP принимаются.
+  Paired regression сохраняет отказ для неверного вызова и отсутствующих
+  требований; пороги не снижались. Исторический отчёт не изменён.
+- Уточнены implicit activation cues и version boundary; русский description
+  JSON-escaped в YAML оставляет router ASCII, native metadata decoding
+  проверен. Чистые платформенные задачи остаются вне scope.
+- Свежие отдельные native GREEN результаты на `181e0f6`: guided **27/27
+  majority, 80/81 individual**, activation **5/6, 16/18**, positive activation
+  3/3, reference-read 2/2, false activation negatives 0/9; оба gate PASS.
+  API БСП/infra ошибок GREEN 0. Три реальные quality failures сохранены:
+  два неверных платформенных вызова и один отказ от каркаса при проблеме
+  доступа к reference; их устранение не заявляется.
+- 168 tests PASS, API 664/664, semantic 0/0, оба dry-run PASS.
+  [История и ограничения](reports/bsp-skills/p2-scoring-and-native-activation-after-v0.14.md).
+
 ## 2026-10-08 — проверенный native runtime transport P0 (не выпущено)
 
 - Добавлен opt-in `--transport native`: inventory до и после модельного turn
