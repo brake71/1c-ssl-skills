@@ -12,6 +12,7 @@
 | 1 | `f32469a` | `message-bound-to-field`, RED/GREEN 1×, native | INFRA FAIL до model turn: обе фазы отклонили `account/read`; model tokens 0 |
 | 2 | `59653f4` | Новый RED/GREEN smoke 1× | RED 1/1, GREEN 1/1; isolation и общий gate PASS, infra 0 |
 | 2 resume | `59653f4` | Тот же отчёт, новый disposable home | PASS без новых model turns; сохранённые receipts и restored control совпали |
+| 3 | Runtime-код `59653f4`, документы `563f516` | Независимый smoke 3× | GREEN 3/3 individual, RED 1/3; isolation и общий gate PASS, infra 0 |
 
 Исходный FAIL не переписан: `.tmp/native-runtime-message-r1.json` и соседние
 artifacts. На каждый model run отдельный app-server, protected disposable
@@ -53,8 +54,20 @@ turn `01a11ab4-014a-7ab0-8153-5e9c1fd13cf6`; в GREEN — PID `29156`, thread
 оба завершённых run и прошёл post-cleanup проверку в новом disposable home;
 модель повторно не вызывалась. Это не новый независимый behavioral PASS.
 
-Следующая проверка — smoke 3×, затем полный native baseline (27 × 3 в каждой
-фазе). Результаты разных профилей/корпусов не объединяются.
+Независимый smoke 3×: `.tmp/native-runtime-message-3x.json`. GREEN 3/3
+individual и 1/1 majority, активация/reference-read по majority 1/1,
+invalid/unsafe/forbidden/infra 0. RED 1/3 individual и 0/1 majority; один RED
+ответ содержит forbidden pattern. Isolation и общий gate PASS.
+
+Полный новый native baseline запущен: 27 × 3 в каждой фазе, `jobs=6`,
+`.tmp/native-runtime-guided-full-3x.json`. До завершения итог не заявляется;
+runtime-код, scorer, corpus и skill fingerprint во время прогона не меняются.
+Результаты разных профилей/корпусов не объединяются.
+
+Дополнительная unit-регрессия проверила failed resume: старые PASS gates
+не остаются в файле с complete=False, новых model turns нет, staging очищен.
+Текущий статический набор — **162 теста PASS**, API 664/664, semantic
+0 ERROR / 0 WARN, оба корпуса dry-run PASS.
 
 ## Что связывается с модельным запуском
 

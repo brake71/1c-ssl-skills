@@ -1,7 +1,11 @@
 import copy
+import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -233,6 +237,59 @@ class NativeTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(native.probe.ProbeError, "identity changed"):
                 native.restored_snapshot("unused", self.root, self.root, "model", "medium", 1, "wrong")
             constructor.assert_not_called()
+
+    def test_failed_resume_clears_stale_pass_gates_without_new_model_calls(self):
+        workdir = self.root / "consumer"
+        workdir.mkdir()
+        subprocess.run(["git", "init", "-q", str(workdir)], check=True)
+        output = self.root / "resume.json"
+        case_id = "message-bound-to-field"
+        record = {
+            "status": "completed", "response": "cached", "returncode": 0, "usage": {},
+            "skill_activated": True, "expected_reference_read": True,
+            "score": {"passed": True, "invalid_methods": [], "unsafe_calls": [], "forbidden_hits": []},
+        }
+        report = {
+            "schema_version": 5, "launcher": "unused", "transport": "native",
+            "transport_profile": native.PROFILE,
+            "native_helper_sha256": runner.file_sha256(Path(native.__file__)),
+            "native_probe_sha256": runner.file_sha256(Path(native.probe.__file__)),
+            "auth_identity_sha256": native.auth_identity(self.auth),
+            "model": "model", "reasoning_effort": "medium", "skill": str(runner.DEFAULT_SKILL),
+            "workdir": str(workdir), "bsl_src": None, "selected_cases": [case_id],
+            "corpus_sha256": runner.file_sha256(runner.DEFAULT_CASES),
+            "reference_matrix_sha256": runner.file_sha256(runner.DEFAULT_REFERENCE_MATRIX),
+            "skill_sha256": runner.skill_sha256(runner.DEFAULT_SKILL),
+            "runner_sha256": runner.file_sha256(Path(runner.__file__)), "runs": 1,
+            "phases_requested": ["red", "green"], "min_pass_rate": 0.8, "min_activation_rate": 0.8,
+            "complete": True, "gate": {"passed": True}, "isolation_gate": {"passed": True},
+            "report_path": str(output), "phases": {
+                phase: {"run_matrix": {case_id: [copy.deepcopy(record)]}} for phase in ("red", "green")
+            },
+        }
+        output.write_text(json.dumps(report), encoding="utf-8")
+        @contextmanager
+        def home(_auth):
+            yield self.root
+        arguments = ["runner", "--transport", "native", "--dir", str(workdir), "--case", case_id,
+                     "--bsl-src", "", "--auth-file", str(self.root / "auth.json"), "--runs", "1",
+                     "--model", "model", "--reasoning-effort", "medium", "--output", str(output), "--resume"]
+        with patch.object(sys, "argv", arguments), patch.object(runner, "resolve_cdx", return_value="unused"), \
+                patch.object(runner, "find_conflicting_skills", return_value=[]), \
+                patch.object(runner, "load_method_index", return_value={}), \
+                patch.object(native, "authenticated_home", side_effect=home), \
+                patch.object(native, "run_native") as model_run, \
+                patch.object(native, "restored_snapshot", side_effect=native.probe.ProbeError("restore failed")), \
+                patch("sys.stderr", new=io.StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                runner.main()
+        self.assertEqual(caught.exception.code, 2)
+        model_run.assert_not_called()
+        updated = json.loads(output.read_text(encoding="utf-8"))
+        self.assertFalse(updated["complete"])
+        self.assertNotIn("gate", updated)
+        self.assertNotIn("isolation_gate", updated)
+        self.assertFalse((workdir / ".agents" / "skills" / "bsp").exists())
 
     def test_report_gate_rejects_missing_turn_and_inventory(self):
         report = {"skill_sha256": "skill", "phases": {"red": {"run_matrix": {
