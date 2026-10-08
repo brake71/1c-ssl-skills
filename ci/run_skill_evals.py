@@ -826,9 +826,18 @@ def negative_example_context(context: str, code_syntax: str) -> bool:
         r"быть\s+не\s+долж", context, re.I
     ):
         return True
-    deictic = re.search(r"\bэтот\s+(?:метод|вызов|код|пример)\b", context, re.I)
+    # An instruction about extra arguments does not prohibit invoking the API.
+    # Remove only that local predicate; retain any independent call prohibition.
+    argument_scoped = re.sub(
+        r"\bв\s+этот\s+(?:метод|вызов)\s+передава\w*\s+"
+        r"не\s+(?:нужно|следует|надо|требуется)\b", "", context, flags=re.I,
+    )
+    if not NEGATIVE_BLOCK_RE.search(argument_scoped):
+        return False
+    deictic = re.search(r"\bэтот\s+(?:метод|вызов|код|пример)\b", argument_scoped, re.I)
     if not deictic:
         return False
+    context = argument_scoped
     if re.search(r"\bэтот\s+код\b", deictic.group(), re.I):
         # "This code belongs before writing; don't invoke the procedure again"
         # warns about a separate action, not about the recommended snippet.
@@ -906,8 +915,13 @@ def executable_bsl_blocks(response: str) -> list[str]:
         sentences = re.split(r"(?<=[.!?])\s+", immediate_prefix)
         # A correction can contain "the advice is wrong" before the actual
         # recommendation. Use its nearest sentence, except connecting labels.
-        if sentences and not re.fullmatch(r"(?:в частности|например)\s*[:.]?", sentences[-1], re.I):
-            immediate_prefix = sentences[-1]
+        if sentences:
+            if re.fullmatch(r"(?:в частности|например)\s*[:.]?", sentences[-1], re.I):
+                # A connecting label inherits only its nearest sentence, not
+                # an earlier denial about a different method in the paragraph.
+                immediate_prefix = " ".join(sentences[-2:])
+            else:
+                immediate_prefix = sentences[-1]
         next_start = matches[index + 1].start() if index + 1 < len(matches) else len(response)
         suffix = response[match.end():min(next_start, match.end() + 320)]
         immediate_suffix = re.split(r"\n\s*\n", suffix.lstrip())[0]
