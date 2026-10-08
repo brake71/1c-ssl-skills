@@ -69,6 +69,8 @@ class P2ResponseScoringTests(unittest.TestCase):
         self.assertTrue(runner.score_response(case, refusal, {})["quality_passed"])
         confirmation = "По документации BSP 3.1.11 подтверждаю сигнатуру BSP 3.2.1."
         self.assertFalse(runner.score_response(case, confirmation, {})["quality_passed"])
+        unrelated_denial = confirmation + " Она не может быть иной."
+        self.assertFalse(runner.score_response(case, unrelated_denial, {})["quality_passed"])
         # A textual refusal still cannot justify a runnable transplanted API.
         transplanted = refusal + "\n```bsl\nОбщегоНазначения.СообщитьПользователю(Текст);\n```"
         self.assertFalse(runner.score_response(case, transplanted, {})["quality_passed"])

@@ -66,8 +66,21 @@ Denial regex принимает «он не может подтвердить»,
 отдельным обязательным условием, корректный отказ без чтения skill не PASS.
 168 tests PASS, API 664/664, semantic 0/0, оба dry-run PASS.
 
-Далее свежие native smoke, activation 3× и guided baseline на неизменном
-commit. Результаты разных корпусов и старого/нового scorer не объединяются.
+Коммит metadata/denial `7ac46f0`: guided smoke PASS; свежий activation
+`.tmp/native-activation-after-p2-r1-3x.json` — 5/6 majority, 16/18 individual,
+activation 3/3, read 2/2, API/infra ошибок 0, оба gate PASS. Но в platform-only
+exchange task два ответа лишний раз читали router, поэтому этот отрицательный
+сценарий не прошёл majority. Корректный итог gate не скрывает эту границу.
+
+Независимый adversarial review выявил, что добавленное голое «не может» могло
+пропустить подтверждение «...подтверждаю 3.2.1...Она не может быть иной».
+Контрпример воспроизведён RED и добавлен к тесту; новая ветка требует именно
+«не может подтвердить/проверить». Metadata дополнительно отделяет платформенную
+регистрацию обмена в начале scope, без общей перечисленной возможности
+«exchange», конфликтовавшей с отрицательным task. Проверки снова PASS.
+
+Далее свежие activation 3× и guided baseline на неизменном commit.
+Результаты разных корпусов и старого/нового scorer не объединяются.
 
 ```mermaid
 flowchart TD

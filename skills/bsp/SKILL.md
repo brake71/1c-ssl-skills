@@ -1,6 +1,6 @@
 ---
 name: bsp
-description: "Read before answering 1C standard-subsystem integration/API questions, even when BSP is not named or a method seems familiar. Triggers: server validation errors beside form fields in a solution with standard subsystems; safe writes in upgrade handlers; BSP module/API selection; checking signatures for ANY BSP version. Verified references cover BSP 3.1.11 only: read the version boundary before answering other-version questions. Covers jobs, exchange, printing, files, access, signatures, localization and classifiers. Pure BSL, native platform exchange registration and changing a form-element caption need no BSP skill. Windows: read with native rg or Python UTF-8 stdout."
+description: "For BSP library integration/API verification, not standalone platform tasks. Native platform exchange-node change registration uses PlansOfExchange directly; no BSP lookup is needed. Ordinary BSL array functions and form-element captions are also platform-only. Read before library answers even when BSP is implicit or a method seems familiar: server validation errors beside form fields in a standard-subsystem solution; safe writes in upgrade handlers; BSP module/API selection; checking signatures for ANY BSP version. Verified references cover BSP 3.1.11 only: read the version boundary for other-version questions. Windows: use native rg or Python UTF-8 stdout."
 ---
 
 # Using 1C:BSP 3.1.11 in application code
