@@ -1938,6 +1938,11 @@ def main() -> None:
                 "report_path": str(report_path),
             }
 
+        # A failed resume must not leave stale PASS gates beside complete=False.
+        report.pop("gate", None)
+        report.pop("isolation_gate", None)
+        report.pop("native_restored_red", None)
+        atomic_write_json(report_path, report)
         home_context = native.authenticated_home(native_auth) if native else _null_context()
         with home_context as native_home:
             for phase in phases:
@@ -2006,9 +2011,9 @@ def main() -> None:
                 }
                 atomic_write_json(report_path, report)
             if native:
-                report["native_restored_red"] = native.probe.native_snapshot(
-                    native.runtime_command(cdx, workdir, args.model, args.reasoning_effort),
-                    workdir, native_home, min(args.timeout, 60),
+                report["native_restored_red"] = native.restored_snapshot(
+                    cdx, workdir, native_home, args.model, args.reasoning_effort,
+                    args.timeout, report["auth_identity_sha256"],
                 )
                 atomic_write_json(report_path, report)
 

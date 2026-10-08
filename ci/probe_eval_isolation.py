@@ -17,6 +17,7 @@ import stat
 import subprocess
 import tempfile
 import threading
+from urllib.parse import urlsplit
 from pathlib import Path
 
 if __package__:
@@ -75,10 +76,23 @@ def is_linked(path: Path) -> bool:
 def audit_environment(home: Path, inherited: dict | None = None) -> dict:
     """Do not forward credentials, provider overrides or host integration tokens."""
     inherited = os.environ if inherited is None else inherited
-    return {
-        **{key: value for key, value in inherited.items() if key.upper() in ENVIRONMENT_KEYS},
-        "CODEX_HOME": str(home), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1",
-    }
+    environment = {key: value for key, value in inherited.items() if key.upper() in ENVIRONMENT_KEYS}
+    for key, value in inherited.items():
+        if key.upper() in {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"}:
+            try:
+                proxy = urlsplit(value)
+                valid_port = proxy.port is None or 1 <= proxy.port <= 65535
+                if (proxy.scheme in {"http", "https", "socks5", "socks5h"} and proxy.hostname
+                        and valid_port and proxy.username is None and proxy.password is None
+                        and not proxy.query and not proxy.fragment and proxy.path in {"", "/"}):
+                    environment[key] = value
+            except ValueError:
+                pass
+        elif key.upper() == "NO_PROXY" and all(
+            character.isalnum() or character in ".-_:,[]* " for character in value
+        ):
+            environment[key] = value
+    return {**environment, "CODEX_HOME": str(home), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
 
 
 def audit_command(cdx: str, workdir: Path, model: str, effort: str | None) -> list[str]:
@@ -108,6 +122,7 @@ class NativeClient:
         self.messages: queue.Queue = queue.Queue()
         self.notifications: list[dict] = []
         self.sequence = 0
+        self.last_rpc_error = None
         self.process = subprocess.Popen(
             command, cwd=workdir, env=environment,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -166,6 +181,7 @@ class NativeClient:
                 raise ProbeError(message["probe_error"])
             if message.get("id") == request_id and "method" not in message:
                 if "error" in message:
+                    self.last_rpc_error = message["error"]
                     # Do not copy arbitrary native error messages into reports.
                     raise ProbeError(f"Native RPC rejected {method}")
                 result = message.get("result")
@@ -334,14 +350,9 @@ def capture_snapshot(client: NativeClient, workdir: Path, home: Path,
             raise ProbeError("Native thread did not apply read-only diagnostic permissions")
         snapshot = {
             "user_agent": initialized.get("userAgent"),
-            "environment_policy": "os-paths-only-v1",
+            "environment_policy": "os-paths-and-credential-free-proxies-v1",
             "environment_names": sorted(environment),
-            "environment_paths_sha256": digest({
-                key: environment.get(key) for key in (
-                    "PATH", "PATHEXT", "SYSTEMROOT", "COMSPEC", "HOME", "USERPROFILE",
-                    "PYTHONUTF8", "PYTHONIOENCODING", "LANG", "LC_ALL", "TERM",
-                )
-            }),
+            "environment_paths_sha256": digest({**environment, "CODEX_HOME": "$AUDIT_CODEX_HOME"}),
             "config_sha256": digest(config),
             "config_layers": [{"source_type": layer.get("name", {}).get("type"),
                                "sha256": digest(layer.get("config"))}

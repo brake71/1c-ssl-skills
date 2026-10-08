@@ -13,6 +13,12 @@
   native notifications сохраняются до RPC ack. 157 unit-тестов PASS,
   coverage/semantic и оба eval dry-run PASS. Реальный smoke/baseline ещё
   требуется; **P0 пока открыт**.
+- Первый реальный native smoke на `f32469a` завершился INFRA FAIL до модели
+  из-за `workspace routing discovery failed`. Исправлено сохранение безопасных
+  proxy endpoint-настроек без credentials; отдельно подтверждён `account/read`.
+  Authenticated post-cleanup контроль теперь проверяет ту же identity;
+  stale PASS gates очищаются при resume. Исходный FAIL сохранён, пороги не
+  снижались. [История итераций](reports/bsp-skills/p0-native-runtime-loop-after-v0.14.md).
 
 ## 2026-10-08 — native preflight P0 (не выпущено)
 

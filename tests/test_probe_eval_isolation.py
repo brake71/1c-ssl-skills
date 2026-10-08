@@ -38,7 +38,7 @@ class IsolationProbeTests(unittest.TestCase):
     def snapshot(self):
         return {
             "user_agent": "native/fixture", "config_sha256": "config",
-            "environment_policy": "os-paths-only-v1",
+            "environment_policy": "os-paths-and-credential-free-proxies-v1",
             "environment_names": ["PATH"], "environment_paths_sha256": "paths",
             "config_layers": [], "skills": [self.record()],
             "plugins_enabled": False, "plugin_inventory_sha256": "plugins",
@@ -233,6 +233,24 @@ class IsolationProbeTests(unittest.TestCase):
         self.assertEqual(set(environment), {
             "PATH", "USERPROFILE", "TEMP", "CODEX_HOME", "PYTHONIOENCODING", "PYTHONUTF8",
         })
+
+    def test_credential_free_proxy_routing_is_preserved(self):
+        environment = probe.audit_environment(self.home, {
+            "HTTPS_PROXY": "http://127.0.0.1:1080", "HTTP_PROXY": "http://proxy.test:3128/",
+            "NO_PROXY": "localhost,127.0.0.1,.internal.test", "UNKNOWN_SECRET": "secret",
+        })
+        self.assertEqual(environment["HTTPS_PROXY"], "http://127.0.0.1:1080")
+        self.assertIn("HTTP_PROXY", environment)
+        self.assertIn("NO_PROXY", environment)
+        self.assertNotIn("UNKNOWN_SECRET", environment)
+
+    def test_proxy_credentials_and_opaque_routes_are_not_forwarded(self):
+        for value in ("http://user:secret@proxy.test", "http://user@proxy.test",
+                      "http://proxy.test/?token=secret", "http://proxy.test/#secret",
+                      "http://proxy.test/secret", "http://proxy.test:invalid", "secret"):
+            with self.subTest(value=value):
+                environment = probe.audit_environment(self.home, {"HTTPS_PROXY": value})
+                self.assertNotIn("HTTPS_PROXY", environment)
 
     def test_commands_do_not_start_a_model_turn_and_pin_restrictions(self):
         command = probe.audit_command("cdx", self.workdir, "exact-model", "medium")

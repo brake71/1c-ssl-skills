@@ -229,6 +229,9 @@ def run_native(cdx, case, workdir, artifact_dir, phase, run_number, model, effor
     except (probe.ProbeError, OSError, ValueError, queue.Empty, subprocess.SubprocessError) as exc:
         returncode = 1
         error = str(exc) if isinstance(exc, probe.ProbeError) else "Native transport failed"
+        rpc_error = getattr(client, "last_rpc_error", None)
+        if isinstance(rpc_error, dict) and isinstance(rpc_error.get("message"), str):
+            error += ": " + rpc_error["message"]
         timed_out = "timeout" in error.lower()
         if before is None or after is None:
             reasons.append("Same-process native inventory is incomplete")
@@ -276,6 +279,24 @@ def run_native(cdx, case, workdir, artifact_dir, phase, run_number, model, effor
     }
 
 
+def restored_snapshot(cdx, workdir, home, model, effort, timeout, identity_sha256) -> dict:
+    if auth_identity(load_auth(home / "auth.json")) != identity_sha256:
+        raise probe.ProbeError("Post-cleanup authentication identity changed")
+    environment = probe.audit_environment(home)
+    client = probe.NativeClient(runtime_command(cdx, workdir, model, effort), workdir, environment, min(timeout, 60))
+    try:
+        initialized = probe.initialize_native(client, home)
+        account = client.call("account/read", {"refreshToken": False})
+        if not isinstance(account.get("account"), dict) or account["account"].get("type") != "chatgpt":
+            raise probe.ProbeError("Post-cleanup native authentication is missing")
+        snapshot, _ = probe.capture_snapshot(client, workdir, home, environment, initialized)
+        snapshot["auth_identity_sha256"] = identity_sha256
+        snapshot["native_account_sha256"] = probe.digest(account)
+        return snapshot
+    finally:
+        client.close()
+
+
 def report_inventory_reasons(report: dict, target: Path) -> list[str]:
     executions = [(phase, run) for phase in ("red", "green")
                   for case_runs in report.get("phases", {}).get(phase, {}).get("run_matrix", {}).values()
@@ -289,6 +310,9 @@ def report_inventory_reasons(report: dict, target: Path) -> list[str]:
     if not isinstance(restored, dict):
         reasons.append("Missing post-cleanup RED inventory")
         restored = control
+    for key in ("auth_identity_sha256", "native_account_sha256"):
+        if not control.get(key) or restored.get(key) != control[key]:
+            reasons.append("Post-cleanup authentication identity differs or is missing")
     for phase, run in executions:
         inventory = run.get("native_inventory", {})
         before, after = inventory.get("before"), inventory.get("after")

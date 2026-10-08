@@ -280,7 +280,7 @@ restricted token: до прогона нужно проверить реальн
 
 `--transport native` выполняет модельный turn через app-server и сохраняет
 native inventory **до и после turn в том же процессе**, с thread/turn IDs.
-После удаления staging снимается контрольный RED snapshot. Каталоги прочих
+После удаления staging снимается авторизованный контрольный RED snapshot. Каталоги прочих
 скилов, config, permissions и account identity должны совпадать между
 реальными RED/GREEN-запусками; нарушение считается инфраструктурным отказом.
 Этот opt-in профиль не объявляется эквивалентным историческому `exec`.
@@ -294,8 +294,10 @@ python ci/run_skill_evals.py --transport native --dir /path/to/consumer --case m
 `--auth-file PATH` задаёт другой источник вне consumer-корня. Credentials
 копируются только в защищённый disposable home, который удаляется после
 прогона; исходный auth.json и глобальные настройки/скилы не изменяются.
-Parent API keys и integration tokens не передаются. Plugins/apps/hooks/
-memories/multi-agent/goals отключены одинаково для фаз. Поддерживается только
+Parent API keys и integration tokens не передаются. Credential-free proxy
+URL без userinfo/query/fragment сохраняются для сетевой маршрутизации и
+входят в environment fingerprint. Plugins/apps/hooks/memories/multi-agent/goals
+отключены одинаково для фаз. Поддерживается только
 `--phase both`; dry-run не читает credentials и не вызывает модель.
 
 BSL scorer и quality thresholds те же, что у `exec`. Отдельный
@@ -305,6 +307,7 @@ Resume фиксирует transport/profile, SHA256 native helpers и identity �
 разных профилей не объединяются. Native trace artifacts редактируются для
 удаления credentials; raw auth/config RPC не сохраняются. До реального
 smoke/baseline P0 не считается закрытым.
+[История commit/run/fix/rerun](reports/bsp-skills/p0-native-runtime-loop-after-v0.14.md).
 
 ### Native preflight изоляции (без вызова модели)
 

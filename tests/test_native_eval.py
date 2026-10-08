@@ -48,7 +48,7 @@ class NativeTransportTests(unittest.TestCase):
 
     def snapshot(self):
         return {
-            "user_agent": "native-fixture", "environment_policy": "os-paths-only-v1",
+            "user_agent": "native-fixture", "environment_policy": "os-paths-and-credential-free-proxies-v1",
             "environment_names": [], "environment_paths_sha256": "environment",
             "config_sha256": "config", "config_layers": [], "skills": [],
             "plugins_enabled": False, "plugin_inventory_sha256": "plugins",
@@ -162,6 +162,18 @@ class NativeTransportTests(unittest.TestCase):
         for artifact in self.root.glob("fixture.*"):
             self.assertNotIn("ACCESS_PRIVATE_SECRET", artifact.read_text(encoding="utf-8"))
 
+    def test_rpc_error_detail_is_redacted_before_artifacts(self):
+        client = FakeClient([])
+        client.last_rpc_error = {"message": "routing failed ACCESS_PRIVATE_SECRET"}
+        with patch.object(native.probe, "NativeClient", return_value=client), \
+                patch.object(native.probe, "initialize_native", side_effect=native.probe.ProbeError("RPC rejected")):
+            case = runner.EvalCase("error", "Task", None, False, False, (), (), ())
+            execution = native.run_native("unused", case, self.root, self.root, "red", 1,
+                                          "model", "medium", 1, "bsp", self.root, "source", native.auth_identity(self.auth))
+        self.assertIn("routing failed", execution["stderr_tail"])
+        self.assertNotIn("ACCESS_PRIVATE_SECRET", json.dumps(execution))
+        self.assertNotIn("ACCESS_PRIVATE_SECRET", (self.root / "error.red.1.stderr.txt").read_text())
+
     def test_native_drift_is_infrastructure_not_quality(self):
         self.assertEqual(runner.infrastructure_reason({
             "native_isolation_reasons": ["drift"], "response": "correct", "returncode": 0,
@@ -186,11 +198,15 @@ class NativeTransportTests(unittest.TestCase):
                 "profile": native.PROFILE, "launcher_pid": 123,
                 "thread_id": "thread", "turn_id": "turn", "before": snapshot, "after": copy.deepcopy(snapshot),
             }}
-        report = {"skill_sha256": "skill", "native_restored_red": self.snapshot(), "phases": {
+        report = {"skill_sha256": "skill", "native_restored_red": copy.deepcopy(red), "phases": {
             "red": {"run_matrix": {"case": [receipt(red)]}},
             "green": {"run_matrix": {"case": [receipt(green)]}},
         }}
         self.assertEqual(native.report_inventory_reasons(report, target), [])
+        for key in ("auth_identity_sha256", "native_account_sha256"):
+            invalid = copy.deepcopy(report)
+            invalid["native_restored_red"].pop(key)
+            self.assertIn("Post-cleanup authentication identity differs or is missing", native.report_inventory_reasons(invalid, target))
         report["native_restored_red"]["config_sha256"] = "drift"
         self.assertTrue(native.report_inventory_reasons(report, target))
 
@@ -202,6 +218,21 @@ class NativeTransportTests(unittest.TestCase):
         client.assert_not_called()
         self.assertTrue(execution["native_isolation_reasons"])
         self.assertEqual(execution["returncode"], 1)
+
+    def test_restored_snapshot_checks_current_auth_in_the_native_process(self):
+        client = FakeClient([])
+        with patch.object(native.probe, "NativeClient", return_value=client), \
+                patch.object(native.probe, "initialize_native", return_value={}), \
+                patch.object(native.probe, "capture_snapshot", return_value=(self.snapshot(), {})):
+            restored = native.restored_snapshot("unused", self.root, self.root, "model", "medium", 1,
+                                                native.auth_identity(self.auth))
+        self.assertEqual(client.requests, [("account/read", {"refreshToken": False})])
+        self.assertEqual(restored["auth_identity_sha256"], native.auth_identity(self.auth))
+        self.assertIn("native_account_sha256", restored)
+        with patch.object(native.probe, "NativeClient") as constructor:
+            with self.assertRaisesRegex(native.probe.ProbeError, "identity changed"):
+                native.restored_snapshot("unused", self.root, self.root, "model", "medium", 1, "wrong")
+            constructor.assert_not_called()
 
     def test_report_gate_rejects_missing_turn_and_inventory(self):
         report = {"skill_sha256": "skill", "phases": {"red": {"run_matrix": {
