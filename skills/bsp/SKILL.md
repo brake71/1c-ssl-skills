@@ -1,6 +1,6 @@
 ---
 name: bsp
-description: "Verified 1C:BSP 3.1.11 APIs and integration workflows. Activate for BSP module/API selection or standard-subsystem integration, including form-field validation messages and safe upgrade writes. Covers jobs, exchange, printing, files, access, upgrades, signatures, localization and classifiers. Native platform plan-of-exchange manager registration, ordinary BSL functions and form-element property edits without BSP integration do not need this skill. When asked about another BSP version, use it only to state the 3.1.11 boundary, not to transfer unverified signatures. Windows: use native rg or Python UTF-8 stdout to read references."
+description: "Read before answering 1C standard-subsystem integration/API questions, even when BSP is not named or a method seems familiar. Triggers: server validation errors beside form fields in a solution with standard subsystems; safe writes in upgrade handlers; BSP module/API selection; checking signatures for ANY BSP version. Verified references cover BSP 3.1.11 only: read the version boundary before answering other-version questions. Covers jobs, exchange, printing, files, access, signatures, localization and classifiers. Pure BSL, native platform exchange registration and changing a form-element caption need no BSP skill. Windows: read with native rg or Python UTF-8 stdout."
 ---
 
 # Using 1C:BSP 3.1.11 in application code
@@ -33,9 +33,14 @@ BSL/platform questions directly when they need no BSP library or subsystem;
 native plan-of-exchange manager change registration is platform-only. The
 presence of BSL files or a form element alone is not an integration task.
 
-1. Select one primary reference from the task table. Add a second only for a
-   genuinely cross-cutting task, such as printing in a background job.
-2. Open the selected reference before answering; the router and remembered
+1. Check the requested BSP version. For a different version, explain that
+   these 3.1.11 references cannot confirm its signatures and request matching
+   documentation/export; this boundary check needs no API reference. For
+   3.1.11 or an unspecified version, select one primary reference from the
+   task table. Add a second only for a genuinely cross-cutting task, such as
+   printing in a background job.
+2. For an integration/API answer, open the selected reference first;
+   the router and remembered
    platform knowledge are insufficient. Locate the scenario using `rg -n`
    headings/keywords, then read its rules, signature, example and pitfalls
    with native rg context options or Python. If a read fails, retry the
@@ -44,11 +49,9 @@ presence of BSL files or a form element alone is not an integration task.
    is unverified instead of guessing it. This step is complete when the
    proposed answer is checked against that section. Read the whole file only
    if section reading is unavailable; avoid unrelated material.
-3. If the user asks about another BSP version, state that 3.1.11 references
-   cannot verify it; request that version's documentation/export and do not
-   show a runnable 3.1.11 signature as if it applied to that version. If the
-   user proposes a call or rule, check its original full `Module.Method` name
-   and purpose. Identify mismatches explicitly.
+3. If the user proposes a call or rule, check its original full
+   `Module.Method` name and purpose. Identify mismatches explicitly. An API
+   signature verified for 3.1.11 is not verification for another BSP version.
 4. Prefer the stable public programmatic-interface region. Internal or
    deprecated APIs require an explicit warning and no public alternative.
    Show overridable-module hooks as implementations: BSP calls them;

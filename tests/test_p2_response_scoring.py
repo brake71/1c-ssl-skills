@@ -61,6 +61,18 @@ class P2ResponseScoringTests(unittest.TestCase):
             with self.subTest(note=note):
                 self.assertEqual(runner.executable_bsl_blocks(block + "\n\n" + note), [])
 
+    def test_other_version_denial_accepts_impersonal_wording_not_confirmation(self):
+        case = next(c for c in runner.load_cases(ROOT / "evals/activation-cases.json")
+                    if c.id == "other-version-api-boundary")
+        refusal = ("В доступном наборе документации описана только BSP 3.1.11, "
+                   "поэтому он не может подтвердить сигнатуру для 3.2.1.")
+        self.assertTrue(runner.score_response(case, refusal, {})["quality_passed"])
+        confirmation = "По документации BSP 3.1.11 подтверждаю сигнатуру BSP 3.2.1."
+        self.assertFalse(runner.score_response(case, confirmation, {})["quality_passed"])
+        # A textual refusal still cannot justify a runnable transplanted API.
+        transplanted = refusal + "\n```bsl\nОбщегоНазначения.СообщитьПользователю(Текст);\n```"
+        self.assertFalse(runner.score_response(case, transplanted, {})["quality_passed"])
+
     def test_text_assertions_still_require_rejection_and_hook_boundary(self):
         progress = self.responses["nonexistent-service-module"].replace(
             "Совет почти верный по смыслу, но имя модуля указано неправильно.", "Совет правильный.")

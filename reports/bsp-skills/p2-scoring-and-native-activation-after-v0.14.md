@@ -54,10 +54,20 @@ GREEN 4/6 majority, activation 1/3, reference-read 1/2, infra 0.
   «он не может подтвердить»; это отдельный scoring дефект, не доказательство
   активации.
 
-Следующий шаг: усилить точные положительные указатели metadata без расширения
-на platform-only задачи; проверить denial regex парными примерами. Затем
-свежие native smoke, activation 3× и guided baseline на неизменном commit.
-Результаты разных корпусов и старого/нового scorer не объединяются.
+После scorer-коммита `1dfbbb6` уточнены положительные metadata triggers:
+прочитать skill до выбора API даже при неявной БСП или знакомом методе;
+отдельно server field validation, safe upgrade write и проверка любой версии
+БСП. Platform-only negatives остались вне scope. Version boundary перенесена
+в начало workflow; для отказа по версии API reference не нужен. Router
+сохранил ASCII и не добавляет API-утверждений.
+
+Denial regex принимает «он не может подтвердить», но парные тесты отвергают
+подтверждение 3.2.1 по 3.1.11 и runnable transplanted call. Activation остаётся
+отдельным обязательным условием, корректный отказ без чтения skill не PASS.
+168 tests PASS, API 664/664, semantic 0/0, оба dry-run PASS.
+
+Далее свежие native smoke, activation 3× и guided baseline на неизменном
+commit. Результаты разных корпусов и старого/нового scorer не объединяются.
 
 ```mermaid
 flowchart TD
