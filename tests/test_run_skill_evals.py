@@ -1726,16 +1726,20 @@ class SummaryTests(unittest.TestCase):
 class ResumeReportTests(unittest.TestCase):
     def test_resume_report_rejects_old_activation_semantics(self):
         report = {"schema_version": 2}
-        with self.assertRaisesRegex(runner.EvalError, "schema_version=4"):
+        with self.assertRaisesRegex(runner.EvalError, "schema_version=5"):
             runner.validate_resume_report(report, {})
 
     def test_resume_report_rejects_pre_encoding_check_semantics(self):
-        with self.assertRaisesRegex(runner.EvalError, "schema_version=4"):
+        with self.assertRaisesRegex(runner.EvalError, "schema_version=5"):
             runner.validate_resume_report({"schema_version": 3}, {})
+
+    def test_resume_report_rejects_pre_native_inventory_semantics(self):
+        with self.assertRaisesRegex(runner.EvalError, "schema_version=5"):
+            runner.validate_resume_report({"schema_version": 4}, {})
 
     def test_resume_report_rejects_incompatible_model(self):
         report = {
-            "schema_version": 4,
+            "schema_version": 5,
             "model": "old-model",
             "selected_cases": ["case-a"],
             "runs": 1,
@@ -1751,7 +1755,7 @@ class ResumeReportTests(unittest.TestCase):
             runner.validate_resume_report(report, expected)
 
     def test_resume_report_rejects_changed_runner(self):
-        report = {"schema_version": 4, "runner_sha256": "old"}
+        report = {"schema_version": 5, "runner_sha256": "old"}
         with self.assertRaisesRegex(runner.EvalError, "runner_sha256"):
             runner.validate_resume_report(report, {"runner_sha256": "new"})
         runner.validate_resume_report(report, {"runner_sha256": "old"})

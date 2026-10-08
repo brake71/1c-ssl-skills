@@ -193,6 +193,28 @@ class IsolationProbeTests(unittest.TestCase):
         self.assertNotIn("secret", json.dumps(result))
         self.assertNotIn(str(self.home), json.dumps(result))
 
+    def test_nested_metadata_paths_are_stable_across_disposable_homes(self):
+        other_home = self.root / "another-home"
+        records = []
+        for home in (self.home, other_home):
+            path = home / "skills" / "common" / "SKILL.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("same bytes")
+            raw = self.record(path=str(path))
+            raw["interface"] = {"iconSmall": str(home / "icons" / "small.png")}
+            records.append(probe.skill_record(raw, home))
+        self.assertEqual(records[0], records[1])
+
+    def test_metadata_path_prefix_does_not_mask_unrelated_directory(self):
+        path = self.home / "common" / "SKILL.md"
+        path.parent.mkdir()
+        path.write_text("same bytes")
+        raw = self.record(path=str(path))
+        raw["interface"] = {"iconSmall": str(self.home) + "-unrelated/icon.png"}
+        first = probe.skill_record(raw, self.home)
+        raw["interface"]["iconSmall"] = "$AUDIT_CODEX_HOME-unrelated/icon.png"
+        self.assertNotEqual(first["metadata_sha256"], probe.skill_record(raw, self.home)["metadata_sha256"])
+
     def test_invalid_skill_metadata_fails_closed(self):
         for raw in (None, "not-a-record", {}, {"name": "common", "enabled": "true"}):
             with self.subTest(raw=raw), self.assertRaises(probe.ProbeError):
@@ -321,7 +343,7 @@ class IsolationProbeTests(unittest.TestCase):
         finally:
             client.close()
 
-    def test_rpc_ignores_notifications_and_matches_response_id(self):
+    def test_rpc_preserves_early_notifications_and_matches_response_id(self):
         program = (
             "import sys,json\n"
             "for line in sys.stdin:\n"
@@ -332,6 +354,7 @@ class IsolationProbeTests(unittest.TestCase):
         client = probe.NativeClient([sys.executable, "-u", "-c", program], self.workdir, dict(os.environ), 2)
         try:
             self.assertEqual(client.call("inventory", {}), {"ok": True})
+            self.assertEqual(client.next_notification(1), {"method": "notification", "params": {}})
         finally:
             client.close()
 

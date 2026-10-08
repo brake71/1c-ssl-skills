@@ -219,7 +219,8 @@ Fingerprint скила вычисляется по точным байтам и 
 число повторов, фазы и пороги; сохраняет уже завершённые качественные результаты
 и повторяет только отсутствующие, незавершённые или инфраструктурно упавшие
 запуски. Отчёт атомарно обновляется после каждого `case × phase × run`.
-Текущая схема отчёта — v4: старые отчёты нельзя возобновлять с новой семантикой.
+Текущая схема отчёта — v5: отчёты v4 и более ранние нельзя возобновлять
+с новой семантикой. Исторические релизные результаты остаются неизменными.
 Инфраструктурные причины (`quota/rate limit`, authentication, network, timeout,
 недоступная модель, sandbox policy и повреждённая кодировка tool output)
 отделены от ошибок качества ответа.
@@ -274,6 +275,36 @@ restricted token: до прогона нужно проверить реальн
 точность методов, вызовы
 служебного API и модулей `*Переопределяемый`, запрещённые антипаттерны и расход
 токенов. Ненулевой код означает, что GREEN не достиг заданных порогов.
+
+### Native runtime transport (отдельный профиль)
+
+`--transport native` выполняет модельный turn через app-server и сохраняет
+native inventory **до и после turn в том же процессе**, с thread/turn IDs.
+После удаления staging снимается контрольный RED snapshot. Каталоги прочих
+скилов, config, permissions и account identity должны совпадать между
+реальными RED/GREEN-запусками; нарушение считается инфраструктурным отказом.
+Этот opt-in профиль не объявляется эквивалентным историческому `exec`.
+
+```bash
+python ci/run_skill_evals.py --transport native --dir /path/to/consumer --case message-bound-to-field --runs 1 --model gpt-6-luna --reasoning-effort medium --output .tmp/native-smoke.json
+```
+
+Нужен отдельный Git-корень вне репозитория и существующий ChatGPT login.
+По умолчанию читается `$CODEX_HOME/auth.json` (или `~/.codex/auth.json`);
+`--auth-file PATH` задаёт другой источник вне consumer-корня. Credentials
+копируются только в защищённый disposable home, который удаляется после
+прогона; исходный auth.json и глобальные настройки/скилы не изменяются.
+Parent API keys и integration tokens не передаются. Plugins/apps/hooks/
+memories/multi-agent/goals отключены одинаково для фаз. Поддерживается только
+`--phase both`; dry-run не читает credentials и не вызывает модель.
+
+BSL scorer и quality thresholds те же, что у `exec`. Отдельный
+`isolation_gate` включён в общий gate, но не заменяет quality gate.
+Resume фиксирует transport/profile, SHA256 native helpers и identity аккаунта
+(не tokens); ранние notifications не теряются до RPC ack, а результаты
+разных профилей не объединяются. Native trace artifacts редактируются для
+удаления credentials; raw auth/config RPC не сохраняются. До реального
+smoke/baseline P0 не считается закрытым.
 
 ### Native preflight изоляции (без вызова модели)
 

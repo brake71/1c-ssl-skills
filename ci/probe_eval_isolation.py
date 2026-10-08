@@ -106,6 +106,7 @@ class NativeClient:
     def __init__(self, command: list[str], workdir: Path, environment: dict, timeout: int):
         self.timeout = timeout
         self.messages: queue.Queue = queue.Queue()
+        self.notifications: list[dict] = []
         self.sequence = 0
         self.process = subprocess.Popen(
             command, cwd=workdir, env=environment,
@@ -175,6 +176,34 @@ class NativeClient:
                 self.send({"id": message["id"], "error": {
                     "code": -32601, "message": "No interactive requests in inventory preflight",
                 }})
+            elif "method" in message and "id" not in message:
+                self.notifications.append(message)
+            else:
+                raise ProbeError("Malformed native RPC message")
+
+    def next_notification(self, timeout: int) -> dict:
+        import time
+        if self.notifications:
+            return self.notifications.pop(0)
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProbeError("Native notification timeout")
+            try:
+                message = self.messages.get(timeout=remaining)
+            except queue.Empty as exc:
+                raise ProbeError("Native notification timeout") from exc
+            if "probe_error" in message:
+                raise ProbeError(message["probe_error"])
+            if "id" in message and "method" in message:
+                self.send({"id": message["id"], "error": {
+                    "code": -32601, "message": "No interactive requests in inventory preflight",
+                }})
+                raise ProbeError("Unexpected native server request")
+            if "method" in message and "id" not in message:
+                return message
+            raise ProbeError("Malformed native RPC message")
 
     def close(self) -> None:
         try:
@@ -212,7 +241,21 @@ def skill_record(raw: dict, home: Path) -> dict:
     else:
         display = str(path)
     # Metadata may contain dependency URLs; keep only a digest, never raw values.
-    metadata = {**raw, "path": display}
+    # Paths embedded in nested metadata (for example interface icon paths) must
+    # not make system-skill fingerprints depend on the temporary CODEX_HOME.
+    home_text = str(home.resolve())
+    def normalize_metadata(value):
+        if isinstance(value, str):
+            for prefix in (home_text, home_text.replace("\\", "/")):
+                if value == prefix or value.startswith(prefix + "/") or value.startswith(prefix + "\\"):
+                    return "$AUDIT_CODEX_HOME" + value[len(prefix):]
+            return value
+        if isinstance(value, list):
+            return [normalize_metadata(item) for item in value]
+        if isinstance(value, dict):
+            return {key: normalize_metadata(item) for key, item in value.items()}
+        return value
+    metadata = normalize_metadata({**raw, "path": display})
     return {
         "name": raw["name"], "path": display, "scope": raw["scope"],
         "enabled": raw["enabled"], "plugin_id": raw.get("pluginId"),
@@ -221,17 +264,19 @@ def skill_record(raw: dict, home: Path) -> dict:
     }
 
 
-def native_snapshot(command: list[str], workdir: Path, home: Path, timeout: int) -> dict:
-    environment = audit_environment(home)
-    client = NativeClient(command, workdir, environment, timeout)
-    try:
-        initialized = client.call("initialize", {
-            "clientInfo": {"name": "bsp-isolation-preflight", "version": "1"},
-            "capabilities": {"experimentalApi": True},
-        })
-        if normalized_path(initialized.get("codexHome", "")) != normalized_path(str(home)):
-            raise ProbeError("Native process did not use disposable CODEX_HOME")
-        client.send({"method": "initialized"})
+def initialize_native(client: NativeClient, home: Path) -> dict:
+    initialized = client.call("initialize", {
+        "clientInfo": {"name": "bsp-isolation-preflight", "version": "1"},
+        "capabilities": {"experimentalApi": True},
+    })
+    if normalized_path(initialized.get("codexHome", "")) != normalized_path(str(home)):
+        raise ProbeError("Native process did not use disposable CODEX_HOME")
+    client.send({"method": "initialized"})
+    return initialized
+
+
+def capture_snapshot(client: NativeClient, workdir: Path, home: Path,
+                     environment: dict, initialized: dict, thread: dict | None = None) -> tuple[dict, dict]:
         config_result = client.call("config/read", {"cwd": str(workdir), "includeLayers": True})
         config = config_result.get("config")
         layers = config_result.get("layers")
@@ -272,11 +317,13 @@ def native_snapshot(command: list[str], workdir: Path, home: Path, timeout: int)
         # marketplace listing for a complete inventory of enabled remote plugins.
         if plugins["marketplaces"]:
             raise ProbeError("Disabled-plugin profile unexpectedly exposes marketplaces")
-        thread = client.call("thread/start", {
-            "cwd": str(workdir), "ephemeral": True,
-            "sandbox": "read-only", "approvalPolicy": "never",
-        })
-        if (normalized_path(thread.get("cwd", "")) != normalized_path(str(workdir))
+        if thread is None:
+            thread = client.call("thread/start", {
+                "cwd": str(workdir), "ephemeral": True,
+                "sandbox": "read-only", "approvalPolicy": "never",
+            })
+        if (not isinstance(thread, dict)
+                or normalized_path(thread.get("cwd", "")) != normalized_path(str(workdir))
                 or not isinstance(thread.get("instructionSources"), list)
                 or thread["instructionSources"]
                 or not isinstance(thread.get("disabledPluginIds"), list)):
@@ -285,7 +332,7 @@ def native_snapshot(command: list[str], workdir: Path, home: Path, timeout: int)
                 or not isinstance(thread.get("sandbox"), dict)
                 or thread["sandbox"].get("type") != "readOnly"):
             raise ProbeError("Native thread did not apply read-only diagnostic permissions")
-        return {
+        snapshot = {
             "user_agent": initialized.get("userAgent"),
             "environment_policy": "os-paths-only-v1",
             "environment_names": sorted(environment),
@@ -308,6 +355,18 @@ def native_snapshot(command: list[str], workdir: Path, home: Path, timeout: int)
                 "disabledPluginIds",
             )},
         }
+        return snapshot, thread
+
+
+def native_snapshot(command: list[str], workdir: Path, home: Path, timeout: int) -> dict:
+    environment = audit_environment(home)
+    client = NativeClient(command, workdir, environment, timeout)
+    try:
+        initialized = initialize_native(client, home)
+        snapshot, _thread = capture_snapshot(
+            client, workdir, home, environment, initialized
+        )
+        return snapshot
     finally:
         client.close()
 

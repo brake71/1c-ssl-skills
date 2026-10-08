@@ -47,7 +47,7 @@ DEFAULT_SKILL = REPO_ROOT / "skills" / "bsp"
 DEFAULT_WORKDIR = REPO_ROOT / "src"
 DEFAULT_BSL_SRC = REPO_ROOT / "src" / "cf"
 DEFAULT_MODEL = "gpt-5.6-luna"
-REPORT_SCHEMA_VERSION = 4
+REPORT_SCHEMA_VERSION = 5
 SKILL_CACHE_PATTERNS = ("__pycache__", "*.pyc", "*.pyo")
 WINDOWS_READING_INSTRUCTIONS = (
     "Text files are UTF-8. On Windows, read them using rg -n . -- PATH "
@@ -1509,6 +1509,8 @@ def infrastructure_reason(execution: dict) -> str | None:
     """Return a stable category for failures outside skill-content quality."""
     if execution.get("timed_out"):
         return "timeout"
+    if execution.get("native_isolation_reasons"):
+        return "native_isolation"
     if execution.get("tool_policy_blocked"):
         return "sandbox_policy"
     if execution.get("tool_output_decode_errors"):
@@ -1745,6 +1747,8 @@ def print_summary(report: dict) -> None:
             f"policy-blocked={summary['tool_policy_blocks']} tokens="
             f"{summary['input_tokens'] + summary['output_tokens']}"
         )
+    if "isolation_gate" in report:
+        print(f"Native isolation gate: {'PASS' if report['isolation_gate']['passed'] else 'FAIL'}")
     if "green" in report["phases"]:
         print(f"GREEN gate: {'PASS' if report['gate']['passed'] else 'FAIL'}")
         for reason in report["gate"]["reasons"]:
@@ -1764,6 +1768,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dir", default=str(DEFAULT_WORKDIR), help="Codex working directory")
     parser.add_argument("--bsl-src", default=str(DEFAULT_BSL_SRC), help="Configuration root with CommonModules")
     parser.add_argument("--cdx", default="cdx", help="Codex launcher command (default: cdx)")
+    parser.add_argument("--transport", choices=("exec", "native"), default="exec",
+                        help="native: opt-in app-server profile with same-process per-turn inventory")
+    parser.add_argument("--auth-file", help="native only: existing ChatGPT auth.json outside consumer root")
     parser.add_argument(
         "--model", default=DEFAULT_MODEL,
         help=f"Exact model id (default: {DEFAULT_MODEL})",
@@ -1793,6 +1800,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    native = None
+    native_auth = None
     try:
         if args.runs < 1:
             raise EvalError("--runs must be at least 1")
@@ -1849,8 +1858,32 @@ def main() -> None:
             report_path = artifact_dir / "report.json"
 
         phases = ["red", "green"] if args.phase == "both" else [args.phase]
+        if args.transport == "native":
+            if __package__:
+                from . import native_eval as native
+            else:
+                import native_eval as native
+            if args.phase != "both":
+                raise EvalError("Native isolation requires --phase both")
+            native.probe.validate_workdir(workdir, report_path)
+            if any(native.probe.is_linked(path) for path in (stage_target, stage_target.parent, stage_target.parent.parent)):
+                raise EvalError("Refusing native staging through linked paths")
+            if not args.dry_run:
+                auth_path = Path(args.auth_file).resolve() if args.auth_file else Path(
+                    os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))
+                ) / "auth.json"
+                if auth_path.resolve().is_relative_to(workdir):
+                    raise EvalError("Native authentication source must be outside consumer root")
+                native_auth = native.load_auth(auth_path)
+        elif args.auth_file:
+            raise EvalError("--auth-file is only supported with --transport native")
         report_settings = {
             "launcher": cdx,
+            "transport": args.transport,
+            "transport_profile": native.PROFILE if native else "exec",
+            "native_helper_sha256": file_sha256(Path(native.__file__)) if native else None,
+            "native_probe_sha256": file_sha256(Path(native.probe.__file__)) if native else None,
+            "auth_identity_sha256": native.auth_identity(native_auth) if native_auth else None,
             "model": args.model,
             "reasoning_effort": args.reasoning_effort,
             "skill": str(skill_dir),
@@ -1879,6 +1912,7 @@ def main() -> None:
             print(f"BSL modules indexed: {len(method_index)}")
             print(f"Launcher: {cdx}")
             print(f"Model: {args.model}")
+            print(f"Transport: {args.transport}")
             print(f"GREEN staging target: {stage_target}")
             return
 
@@ -1904,66 +1938,88 @@ def main() -> None:
                 "report_path": str(report_path),
             }
 
-        for phase in phases:
-            context = staged_skill(skill_dir, stage_target) if phase == "green" else _null_context()
-            with context:
-                def execute(case: EvalCase, run_number: int) -> dict:
-                    print(
-                        f"[{phase.upper()}] {case.id} run {run_number}/{args.runs}",
-                        flush=True,
-                    )
-                    execution = run_cdx(
-                        cdx, case, workdir, artifact_dir, phase, run_number,
-                        args.model, args.reasoning_effort, args.timeout, skill_name,
-                    )
-                    execution["score"] = score_response(
-                        case,
-                        execution["response"],
-                        method_index,
-                        skill_activated=execution["skill_activated"],
-                        require_activation=phase == "green",
-                        reference_read=execution["expected_reference_read"],
-                        require_reference=(
-                            phase == "green" and case.should_trigger and bool(case.reference)
-                        ),
-                    )
-                    execution["infrastructure_reason"] = infrastructure_reason(execution)
-                    execution["status"] = execution_status(execution)
-                    return execution
+        home_context = native.authenticated_home(native_auth) if native else _null_context()
+        with home_context as native_home:
+            for phase in phases:
+                context = staged_skill(skill_dir, stage_target) if phase == "green" else _null_context()
+                with context:
+                    def execute(case: EvalCase, run_number: int) -> dict:
+                        print(
+                            f"[{phase.upper()}] {case.id} run {run_number}/{args.runs}",
+                            flush=True,
+                        )
+                        parameters = (
+                            cdx, case, workdir, artifact_dir, phase, run_number,
+                            args.model, args.reasoning_effort, args.timeout, skill_name,
+                        )
+                        if native:
+                            execution = native.run_native(
+                                *parameters, native_home, report["skill_sha256"],
+                                report["auth_identity_sha256"],
+                            )
+                        else:
+                            execution = run_cdx(*parameters)
+                        execution["score"] = score_response(
+                            case,
+                            execution["response"],
+                            method_index,
+                            skill_activated=execution["skill_activated"],
+                            require_activation=phase == "green",
+                            reference_read=execution["expected_reference_read"],
+                            require_reference=(
+                                phase == "green" and case.should_trigger and bool(case.reference)
+                            ),
+                        )
+                        execution["infrastructure_reason"] = infrastructure_reason(execution)
+                        execution["status"] = execution_status(execution)
+                        return execution
 
-                def save_progress(
-                    _case_index: int,
-                    _run_index: int,
-                    matrix: list[list[dict | None]],
-                ) -> None:
-                    phase_cases = phase_case_records(cases, matrix, args.runs)
-                    report["phases"][phase] = {
-                        "run_matrix": {
-                            case.id: matrix[index] for index, case in enumerate(cases)
-                        },
-                        "cases": phase_cases,
-                        "summary": summarize_phase(phase_cases),
-                    }
-                    atomic_write_json(report_path, report)
+                    def save_progress(
+                        _case_index: int,
+                        _run_index: int,
+                        matrix: list[list[dict | None]],
+                    ) -> None:
+                        phase_cases = phase_case_records(cases, matrix, args.runs)
+                        report["phases"][phase] = {
+                            "run_matrix": {
+                                case.id: matrix[index] for index, case in enumerate(cases)
+                            },
+                            "cases": phase_cases,
+                            "summary": summarize_phase(phase_cases),
+                        }
+                        atomic_write_json(report_path, report)
 
-                stored_runs = report.get("phases", {}).get(phase, {}).get("run_matrix")
-                initial_matrix = resume_run_matrix(cases, args.runs, stored_runs)
-                run_matrix = execute_run_matrix(
-                    cases, args.runs, args.jobs, execute,
-                    on_run_complete=save_progress,
-                    initial_matrix=initial_matrix,
+                    stored_runs = report.get("phases", {}).get(phase, {}).get("run_matrix")
+                    initial_matrix = resume_run_matrix(cases, args.runs, stored_runs)
+                    run_matrix = execute_run_matrix(
+                        cases, args.runs, args.jobs, execute,
+                        on_run_complete=save_progress,
+                        initial_matrix=initial_matrix,
+                    )
+                    phase_cases = phase_case_records(cases, run_matrix, args.runs)
+                report["phases"][phase] = {
+                    "run_matrix": {
+                        case.id: run_matrix[index] for index, case in enumerate(cases)
+                    },
+                    "cases": phase_cases,
+                    "summary": summarize_phase(phase_cases),
+                }
+                atomic_write_json(report_path, report)
+            if native:
+                report["native_restored_red"] = native.probe.native_snapshot(
+                    native.runtime_command(cdx, workdir, args.model, args.reasoning_effort),
+                    workdir, native_home, min(args.timeout, 60),
                 )
-                phase_cases = phase_case_records(cases, run_matrix, args.runs)
-            report["phases"][phase] = {
-                "run_matrix": {
-                    case.id: run_matrix[index] for index, case in enumerate(cases)
-                },
-                "cases": phase_cases,
-                "summary": summarize_phase(phase_cases),
-            }
-            atomic_write_json(report_path, report)
+                atomic_write_json(report_path, report)
 
         gate_reasons = []
+        if native:
+            isolation_reasons = native.report_inventory_reasons(report, stage_target)
+            report["isolation_gate"] = {
+                "profile": native.PROFILE, "passed": not isolation_reasons,
+                "reasons": isolation_reasons,
+            }
+            gate_reasons.extend(isolation_reasons)
         if "green" in report["phases"]:
             green = report["phases"]["green"]["summary"]
             gate_reasons.extend(green_gate_reasons(
@@ -1986,7 +2042,9 @@ def main() -> None:
         print_summary(report)
         if not args.no_fail and not report["gate"]["passed"]:
             sys.exit(1)
-    except EvalError as exc:
+    except RuntimeError as exc:
+        if not isinstance(exc, EvalError) and (native is None or not isinstance(exc, native.probe.ProbeError)):
+            raise
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(2)
 

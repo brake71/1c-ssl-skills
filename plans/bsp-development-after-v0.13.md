@@ -39,11 +39,16 @@ GREEN и после удаления staged `bsp`; неожиданные раз
 `../reports/bsp-skills/p0-native-preflight-after-v0.14.md`.
 
 Это **отдельный app-server профиль**, а не наблюдение реальных `exec`-процессов.
-PASS preflight не закрывает P0 и не меняет ограничения релизов. Ближайшая
-итерация: получить native inventory **в том же процессе, который выполняет
-поведенческий turn**, связать его с отчётом и resume, затем выполнить новый
-RED/GREEN smoke/baseline. При смене transport/profile явно обозначить новую
-границу сравнимости; не переносить исторические результаты.
+PASS preflight не закрывает P0 и не меняет ограничения релизов.
+Добавлен opt-in `--transport native` / профиль `native-runtime-v1`:
+per-run inventory до/после turn в одном процессе, PID/thread/turn binding,
+post-cleanup RED snapshot, отдельный isolation gate, schema v5 и resume
+fingerprints helpers/account identity. Credentials используются только в
+защищённом disposable home; исходный auth.json не меняется. Native helper
+покрыт unit-тестами; до реального smoke/baseline **P0 не закрывать**.
+Следующий шаг — выполнить этот smoke, исправлять только подтверждённые причины,
+фиксировать коммиты и перезапуски в отдельном runtime-отчёте. Новый профиль
+не объявлять эквивалентным историческому `exec`.
 
 **Зачем:** проектные `.agents/skills/` могут обнаруживаться агентом как в RED,
 так и в GREEN, если рабочий каталог находится внутри этого репозитория.

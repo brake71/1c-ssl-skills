@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-08 — native runtime transport P0 (candidate, не выпущено)
+
+- Добавлен opt-in `--transport native`: inventory до и после модельного turn
+  в одном app-server процессе, binding PID/thread/turn и контроль RED после
+  удаления staging. Isolation gate отдельный от quality, оба обязательны.
+- Сохранены scorer и пороги; стандартный transport остаётся `exec`. Новый
+  профиль не смешивается с историческими прогонами. Schema v5 фиксирует
+  transport/profile, SHA256 helpers и account identity для resume.
+- ChatGPT auth используется только в защищённом disposable home, исходный
+  auth.json не изменяется. Credentials удаляются из trace artifacts; ранние
+  native notifications сохраняются до RPC ack. 157 unit-тестов PASS,
+  coverage/semantic и оба eval dry-run PASS. Реальный smoke/baseline ещё
+  требуется; **P0 пока открыт**.
+
 ## 2026-10-08 — native preflight P0 (не выпущено)
 
 - Добавлен `ci/probe_eval_isolation.py`: native snapshots каталога скилов,
