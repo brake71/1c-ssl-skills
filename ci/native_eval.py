@@ -306,6 +306,8 @@ def report_inventory_reasons(report: dict, target: Path) -> list[str]:
     if control is None:
         return ["No actual RED runtime inventory"]
     reasons = []
+    if report.get("native_warmup_red") != control:
+        reasons.append("Bootstrap RED inventory differs from actual model runs")
     restored = report.get("native_restored_red")
     if not isinstance(restored, dict):
         reasons.append("Missing post-cleanup RED inventory")

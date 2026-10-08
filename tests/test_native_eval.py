@@ -202,7 +202,8 @@ class NativeTransportTests(unittest.TestCase):
                 "profile": native.PROFILE, "launcher_pid": 123,
                 "thread_id": "thread", "turn_id": "turn", "before": snapshot, "after": copy.deepcopy(snapshot),
             }}
-        report = {"skill_sha256": "skill", "native_restored_red": copy.deepcopy(red), "phases": {
+        report = {"skill_sha256": "skill", "native_warmup_red": copy.deepcopy(red),
+                  "native_restored_red": copy.deepcopy(red), "phases": {
             "red": {"run_matrix": {"case": [receipt(red)]}},
             "green": {"run_matrix": {"case": [receipt(green)]}},
         }}
@@ -211,6 +212,11 @@ class NativeTransportTests(unittest.TestCase):
             invalid = copy.deepcopy(report)
             invalid["native_restored_red"].pop(key)
             self.assertIn("Post-cleanup authentication identity differs or is missing", native.report_inventory_reasons(invalid, target))
+        for key, value in (("native_warmup_red", None), ("native_warmup_red", {**red, "config_sha256": "drift"})):
+            invalid = copy.deepcopy(report)
+            invalid[key] = value
+            self.assertIn("Bootstrap RED inventory differs from actual model runs",
+                          native.report_inventory_reasons(invalid, target))
         report["native_restored_red"]["config_sha256"] = "drift"
         self.assertTrue(native.report_inventory_reasons(report, target))
 
@@ -263,8 +269,9 @@ class NativeTransportTests(unittest.TestCase):
             "runner_sha256": runner.file_sha256(Path(runner.__file__)), "runs": 1,
             "phases_requested": ["red", "green"], "min_pass_rate": 0.8, "min_activation_rate": 0.8,
             "complete": True, "gate": {"passed": True}, "isolation_gate": {"passed": True},
+            "native_warmup_red": {"stale": True}, "native_restored_red": {"stale": True},
             "report_path": str(output), "phases": {
-                phase: {"run_matrix": {case_id: [copy.deepcopy(record)]}} for phase in ("red", "green")
+                phase: {"run_matrix": {case_id: [None]}} for phase in ("red", "green")
             },
         }
         output.write_text(json.dumps(report), encoding="utf-8")
@@ -274,16 +281,29 @@ class NativeTransportTests(unittest.TestCase):
         arguments = ["runner", "--transport", "native", "--dir", str(workdir), "--case", case_id,
                      "--bsl-src", "", "--auth-file", str(self.root / "auth.json"), "--runs", "1",
                      "--model", "model", "--reasoning-effort", "medium", "--output", str(output), "--resume"]
+        order = []
+        warmup = self.snapshot()
+        warmup.update(auth_identity_sha256=native.auth_identity(self.auth), native_account_sha256="account")
+        def snapshot(*_args):
+            order.append("warmup" if order.count("warmup") == 0 else "cleanup")
+            if order[-1] == "cleanup":
+                raise native.probe.ProbeError("restore failed")
+            return copy.deepcopy(warmup)
+        def matrix(_cases, _runs, _jobs, _execute, **_kwargs):
+            order.append("matrix")
+            return [[copy.deepcopy(record)]]
         with patch.object(sys, "argv", arguments), patch.object(runner, "resolve_cdx", return_value="unused"), \
                 patch.object(runner, "find_conflicting_skills", return_value=[]), \
                 patch.object(runner, "load_method_index", return_value={}), \
                 patch.object(native, "authenticated_home", side_effect=home), \
+                patch.object(runner, "execute_run_matrix", side_effect=matrix), \
                 patch.object(native, "run_native") as model_run, \
-                patch.object(native, "restored_snapshot", side_effect=native.probe.ProbeError("restore failed")), \
+                patch.object(native, "restored_snapshot", side_effect=snapshot), \
                 patch("sys.stderr", new=io.StringIO()):
             with self.assertRaises(SystemExit) as caught:
                 runner.main()
         self.assertEqual(caught.exception.code, 2)
+        self.assertEqual(order, ["warmup", "matrix", "matrix", "cleanup"])
         model_run.assert_not_called()
         updated = json.loads(output.read_text(encoding="utf-8"))
         self.assertFalse(updated["complete"])

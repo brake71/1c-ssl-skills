@@ -1942,9 +1942,24 @@ def main() -> None:
         report.pop("gate", None)
         report.pop("isolation_gate", None)
         report.pop("native_restored_red", None)
+        report.pop("native_warmup_red", None)
         atomic_write_json(report_path, report)
         home_context = native.authenticated_home(native_auth) if native else _null_context()
         with home_context as native_home:
+            if native:
+                # Cold concurrent app-servers race SQLite bootstrap in a fresh
+                # CODEX_HOME. Initialize once before any worker/model turn.
+                warmup = native.restored_snapshot(
+                    cdx, workdir, native_home, args.model, args.reasoning_effort,
+                    args.timeout, report["auth_identity_sha256"],
+                )
+                warmup_reasons = native.phase_inventory_reasons(
+                    warmup, "red", stage_target, report["skill_sha256"],
+                )
+                if warmup_reasons or warmup.get("auth_identity_sha256") != report["auth_identity_sha256"]:
+                    raise EvalError("Native warmup RED inventory or identity is invalid")
+                report["native_warmup_red"] = warmup
+                atomic_write_json(report_path, report)
             for phase in phases:
                 context = staged_skill(skill_dir, stage_target) if phase == "green" else _null_context()
                 with context:
