@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-10-08 — native runtime transport P0 (candidate, не выпущено)
+## 2026-10-08 — проверенный native runtime transport P0 (не выпущено)
 
 - Добавлен opt-in `--transport native`: inventory до и после модельного turn
   в одном app-server процессе, binding PID/thread/turn и контроль RED после
@@ -21,7 +21,18 @@
   снижались. После коммита `59653f4` повторный native smoke: RED 1/1,
   GREEN 1/1, isolation/quality gate PASS, infra 0. Resume в новом disposable
   home тоже PASS без новых model turns. 161 unit-тест PASS; полный новый
-  baseline ещё требуется. [История итераций](reports/bsp-skills/p0-native-runtime-loop-after-v0.14.md).
+  baseline: GREEN 27/27 majority и 79/81 individual, API/infra ошибок GREEN 0,
+  но общий gate FAIL из-за пяти RED cold-start процессов. Без модели
+  воспроизведена гонка SQLite bootstrap (3/6 против 6/6 после последовательной
+  инициализации). Исправление `3cae3de` сериализует authenticated bootstrap
+  до model workers и сравнивает его с actual RED. Старый FAIL сохранён.
+- Свежий full native baseline после исправления: **GREEN 27/27 majority,
+  77/81 individual**, activation/reference 26/26, API/process/infra ошибок
+  GREEN 0; isolation и общий gate **PASS**. Full resume в новом home PASS
+  без новых model turns. 162 unit-теста PASS. **P0 закрыт только для native
+  профиля**, не для старых `exec`-результатов. Четыре individual quality
+  failures сохранены для отдельного P2-разбора; скил и пороги не менялись.
+  [История итераций](reports/bsp-skills/p0-native-runtime-loop-after-v0.14.md).
 
 ## 2026-10-08 — native preflight P0 (не выпущено)
 

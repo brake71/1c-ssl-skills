@@ -30,7 +30,9 @@
 
 ## P0 — чистая и воспроизводимая база сравнений
 
-**Статус на 2026-10-08: не закрыт.** Добавлен
+**Статус на 2026-10-08: закрыт для `native-runtime-v1` профиля.**
+Для стандартного/исторического `exec` ограничение остаётся; результаты туда
+не переносятся. Добавлен
 `ci/probe_eval_isolation.py`: native preflight без model turns, с отдельным
 credential-free `CODEX_HOME`. Он сравнивает catalog/config/permissions в RED,
 GREEN и после удаления staged `bsp`; неожиданные различия и ошибки discovery
@@ -44,11 +46,16 @@ PASS preflight не закрывает P0 и не меняет ограниче�
 per-run inventory до/после turn в одном процессе, PID/thread/turn binding,
 post-cleanup RED snapshot, отдельный isolation gate, schema v5 и resume
 fingerprints helpers/account identity. Credentials используются только в
-защищённом disposable home; исходный auth.json не меняется. Native helper
-покрыт unit-тестами; до реального smoke/baseline **P0 не закрывать**.
-Следующий шаг — выполнить этот smoke, исправлять только подтверждённые причины,
-фиксировать коммиты и перезапуски в отдельном runtime-отчёте. Новый профиль
-не объявлять эквивалентным историческому `exec`.
+защищённом disposable home; исходный auth.json не меняется. После исправлений
+proxy routing и SQLite cold bootstrap свежий native baseline 27 × 3 × 2:
+GREEN 27/27 majority, 77/81 individual, activation/reference-read 26/26,
+API/process/infra ошибок GREEN 0; isolation/общий gate PASS. Resume в новом
+home тоже PASS без новых model turns. 162 unit-теста PASS.
+
+[История коммитов, исходных FAIL и повторов](../reports/bsp-skills/p0-native-runtime-loop-after-v0.14.md).
+Следующий шаг — P1/P2: отдельный native activation corpus и разбор четырёх
+individual quality failures без снижения порогов. Не объявлять новый профиль
+эквивалентным историческому `exec` или качество безусловно правильным.
 
 **Зачем:** проектные `.agents/skills/` могут обнаруживаться агентом как в RED,
 так и в GREEN, если рабочий каталог находится внутри этого репозитория.

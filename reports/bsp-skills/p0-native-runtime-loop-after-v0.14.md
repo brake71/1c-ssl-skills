@@ -2,7 +2,9 @@
 
 Дата: 2026-10-08. Новый профиль `native-runtime-v1`, не эквивалентный
 историческому `exec`. Скил v0.14 и quality thresholds не менялись.
-**P0 открыт до успешного реального smoke/baseline.**
+**P0 закрыт для контролируемого `native-runtime-v1` профиля:** свежий полный
+baseline и оба gate PASS. Исторический/стандартный `exec` не получает этого
+доказательства; его ограничения остаются.
 
 ## Зафиксированные итерации
 
@@ -13,6 +15,10 @@
 | 2 | `59653f4` | Новый RED/GREEN smoke 1× | RED 1/1, GREEN 1/1; isolation и общий gate PASS, infra 0 |
 | 2 resume | `59653f4` | Тот же отчёт, новый disposable home | PASS без новых model turns; сохранённые receipts и restored control совпали |
 | 3 | Runtime-код `59653f4`, документы `563f516` | Независимый smoke 3× | GREEN 3/3 individual, RED 1/3; isolation и общий gate PASS, infra 0 |
+| 4 | Тот же runtime-код | Полный native baseline 27 × 3 × 2 | GREEN 27/27 majority, 79/81 individual; общий/isolation gate FAIL из-за пяти cold-start RED процессов |
+| 5 | `3cae3de` | Smoke после serialized bootstrap | RED/GREEN 1/1, isolation/общий gate PASS |
+| 6 | `3cae3de` | Свежий полный baseline 27 × 3 × 2 | GREEN 27/27 majority, 77/81 individual; isolation/общий gate PASS, infra 0 |
+| 6 resume | `3cae3de` | Полный отчёт в новом disposable home | PASS без новых model turns, gates пересчитаны после authenticated bootstrap/cleanup |
 
 Исходный FAIL не переписан: `.tmp/native-runtime-message-r1.json` и соседние
 artifacts. На каждый model run отдельный app-server, protected disposable
@@ -59,10 +65,54 @@ individual и 1/1 majority, активация/reference-read по majority 1/1,
 invalid/unsafe/forbidden/infra 0. RED 1/3 individual и 0/1 majority; один RED
 ответ содержит forbidden pattern. Isolation и общий gate PASS.
 
-Полный новый native baseline запущен: 27 × 3 в каждой фазе, `jobs=6`,
-`.tmp/native-runtime-guided-full-3x.json`. До завершения итог не заявляется;
-runtime-код, scorer, corpus и skill fingerprint во время прогона не меняются.
-Результаты разных профилей/корпусов не объединяются.
+Первый полный baseline завершён: `.tmp/native-runtime-guided-full-3x.json`.
+GREEN 27/27 majority, 79/81 individual, activation/reference-read 26/26,
+invalid/unsafe/forbidden/process/infra 0. RED 1/25 полностью оценённых кейсов;
+две задачи не полностью оценены из-за пяти инфраструктурных отказов. Общий
+и isolation gate **FAIL**, не частичный PASS. Исходный отчёт сохранён;
+результаты разных профилей/корпусов не объединяются.
+
+### SQLite cold-start race
+
+Пять RED workers первой холодной группы (`message-bound-to-field` #1/#2/#3,
+`long-operation-with-result` #1/#2) закрыли stdout до initialize/inventory,
+thread/turn IDs отсутствуют, model tokens 0. Последующие workers, включая
+весь GREEN, работали без infrastructure errors.
+
+Контроль без model turns в новом защищённом home воспроизвёл ошибку:
+параллельные шесть app-servers — 3/6 успешных; sanitized stderr отказов:
+`failed to initialize sqlite state runtime`. Один последовательный
+bootstrap перед тем же пулом дал 6/6 успешных. Артефакты диагностики —
+`.tmp/native-cold-start-diagnostic.py` и
+`.tmp/native-cold-start-diagnostic-result.json` (credentials redacted).
+
+Исправление `3cae3de`: один authenticated RED bootstrap до ThreadPool и любых
+model turns; его inventory сравнивается с actual RED control. Ошибка bootstrap
+останавливает прогон до модели; порядок и fail-closed проверены регрессией.
+
+После коммита выполнены новый smoke `.tmp/native-runtime-message-r3.json` и
+**свежий**, не resume старого FAIL, полный baseline
+`.tmp/native-runtime-guided-full-r2-3x.json`. GREEN **27/27 majority, 77/81
+individual**, activation/reference-read по majority 26/26, invalid/unsafe/
+forbidden/process/infra 0. RED 4/27 majority, 10/81 individual, infra 0.
+Все 162 runs завершены; account/config/catalog inventories совпали по
+профильным критериям, включая bootstrap и authenticated post-cleanup RED.
+Isolation и общий gate **PASS**.
+
+Четыре individual GREEN quality failures сохранены без повторного выбора
+удачного ответа: `scheduled-job-module-suffix` #3, `nonexistent-service-module`
+#3, `sms-public-wrapper-not-hook` #3, `connected-command-hook-boundary` #1.
+Все прочли reference; причины относятся к полноте/формулировкам/кодовым
+требованиям, не к API или инфраструктуре. Их содержательный разбор — отдельная
+итерация P2, а не основание ослабить gate. Это не 81/81 и не доказательство
+безусловной правильности скила.
+
+Source auth.json проверен неизменным после smoke и полного прогона;
+проверенные report/artifact файлы (658) не содержали известных credentials.
+Staging и private runtime homes удалены. Parent повторно сверил SHA256 runner,
+helpers в отчётах с текущим кодом, затем выполнил full `--resume` в новом home:
+оба gate PASS, новых model turns нет. Это проверка resume, не независимый
+второй full behavioral прогон.
 
 Дополнительная unit-регрессия проверила failed resume: старые PASS gates
 не остаются в файле с complete=False, новых model turns нет, staging очищен.
@@ -73,7 +123,9 @@ runtime-код, scorer, corpus и skill fingerprint во время прогон
 
 ```mermaid
 flowchart TD
-    A[Отдельный app-server] --> B[Account и inventory до]
+    W[Новый защищённый home] --> S[Последовательный SQLite bootstrap]
+    S --> A[Пул отдельных app-servers]
+    A --> B[Account и inventory до]
     B --> C[Thread и model turn]
     C --> D[Account и inventory после]
     D --> E[Receipt: PID, thread, turn]
@@ -105,5 +157,7 @@ Resume schema v5 связывает corpus/matrix/skill/runner/transport helpers
   ошибкой скила и не исправляется уменьшением порогов.
 - Результаты не переносятся на старые `exec`-отчёты v0.13/v0.14 и не смешиваются
   с отдельным activation corpus.
-- После исправленного smoke: повтор 3× и проверка resume, затем новый полный
-  native baseline. Код и отчёты коммитятся отдельно; push/релиз не выполняются.
+- Следующий этап — P1/P2: отдельно расширять границы активации и разбирать
+  четыре individual quality failures по сохранённым ответам и источникам.
+  Activation corpus в этой итерации не запускался через native transport;
+  его результаты v0.14 не переносятся сюда. Push/релиз не выполнялись.

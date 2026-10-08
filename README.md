@@ -305,8 +305,14 @@ BSL scorer и quality thresholds те же, что у `exec`. Отдельный
 Resume фиксирует transport/profile, SHA256 native helpers и identity аккаунта
 (не tokens); ранние notifications не теряются до RPC ack, а результаты
 разных профилей не объединяются. Native trace artifacts редактируются для
-удаления credentials; raw auth/config RPC не сохраняются. До реального
-smoke/baseline P0 не считается закрытым.
+удаления credentials; raw auth/config RPC не сохраняются. Холодный SQLite
+bootstrap сериализован до пула: без этого параллельные app-servers могут
+падать в новом home ещё до inventory. Bootstrap также проверяется gate.
+
+Свежий native baseline: GREEN 27/27 majority, 77/81 individual, оба gate PASS,
+без API/process/infra ошибок GREEN. P0 закрыт **только для этого профиля**;
+четыре individual quality failures остались в отчёте. Стандартный/исторический
+`exec` и native activation corpus этим результатом не проверены.
 [История commit/run/fix/rerun](reports/bsp-skills/p0-native-runtime-loop-after-v0.14.md).
 
 ### Native preflight изоляции (без вызова модели)
