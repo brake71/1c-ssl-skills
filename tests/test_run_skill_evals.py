@@ -321,6 +321,98 @@ class JsonlTests(unittest.TestCase):
             1,
         )
 
+    def test_explicit_reader_diagnostic_blocks_target_despite_batch_success(self):
+        path = ".agents/skills/bsp/references/commands-external.md"
+        events = [{"type": "item.completed", "item": {
+            "type": "command_execution", "exit_code": 0,
+            "command": f"rg -n . {path}; rg --files",
+            "aggregated_output": (
+                f"rg: {path}: No such file or directory (os error 2)\nREADME.md"
+            ),
+        }}]
+        self.assertEqual(
+            runner.skill_activation_evidence(events, "bsp", "commands-external.md"), []
+        )
+        # The same reader failure with its own nonzero status remains rejected.
+        events[0]["item"].update(exit_code=1, command=f"rg -n . {path}")
+        self.assertEqual(
+            runner.skill_activation_evidence(events, "bsp", "commands-external.md"), []
+        )
+
+    def test_reader_diagnostics_normalize_windows_paths_and_support_python(self):
+        path = r".agents\\skills\\bsp\\references\\prefixes.md"
+        cases = (
+            (f"rg: {path}: Системе не удается найти указанный путь. (os error 3)", f"rg -n . {path}"),
+            (f"FileNotFoundError: [Errno 2] No such file or directory: '{path}'",
+             f'python -c "from pathlib import Path; print(Path({path!r}).read_text())"'),
+        )
+        for diagnostic, command in cases:
+            with self.subTest(diagnostic=diagnostic):
+                events = [{"type": "item.completed", "item": {
+                    "type": "command_execution", "exit_code": 0,
+                    "command": command,
+                    "aggregated_output": diagnostic + "\n# unrelated listing",
+                }}]
+                self.assertEqual(
+                    runner.skill_activation_evidence(events, "bsp", "prefixes.md"), []
+                )
+
+    def test_diagnostic_target_boundaries_and_later_independent_read(self):
+        path = ".agents/skills/bsp/references/prefixes.md"
+        good_read = {"type": "item.completed", "item": {
+            "type": "command_execution", "exit_code": 0,
+            "command": f"Get-Content {path}",
+            "aggregated_output": "The documentation says errors are ordinary conditions.",
+        }}
+        unrelated_failure = {"type": "item.completed", "item": {
+            "type": "command_execution", "exit_code": 0,
+            "command": f"rg -n . {path}; rg --files",
+            "aggregated_output": (
+                "rg: .agents/skills/bsp/references/prefixes.md.bak: "
+                "No such file or directory (os error 2)\n# Actual reference content"
+            ),
+        }}
+        other_reference_failure = {"type": "item.completed", "item": {
+            "type": "command_execution", "exit_code": 0,
+            "command": f"rg -n . {path}; rg --files",
+            "aggregated_output": (
+                "rg: .agents/skills/bsp/references/other.md: "
+                "No such file or directory (os error 2)\n# Actual reference content"
+            ),
+        }}
+        self.assertEqual(len(runner.skill_activation_evidence(
+            [unrelated_failure, good_read], "bsp", "prefixes.md")), 2)
+        self.assertEqual(len(runner.skill_activation_evidence(
+            [other_reference_failure, good_read], "bsp", "prefixes.md")), 2)
+        failed_batch = {**good_read, "item": {**good_read["item"],
+            "command": f"rg -n . {path}; Get-Content {path}",
+            "aggregated_output": (
+                f"rg: {path}: No such file or directory (os error 2)\n"
+                "The documentation says errors are ordinary conditions."
+            ),
+        }}
+        self.assertEqual(runner.skill_activation_evidence(
+            [failed_batch], "bsp", "prefixes.md"), [])
+        # A completed later event is independent positive evidence and recovers.
+        self.assertEqual(len(runner.skill_activation_evidence(
+            [failed_batch, good_read], "bsp", "prefixes.md")), 1)
+
+    def test_failure_diagnostic_is_scoped_to_each_reader_target(self):
+        path = ".agents/skills/bsp/references/prefixes.md"
+        skill = ".agents/skills/bsp/SKILL.md"
+        events = [{"type": "item.completed", "item": {
+            "type": "command_execution", "exit_code": 0,
+            "command": f"rg -n . {path} {skill}; rg --files",
+            "aggregated_output": f"{skill}:1:name: bsp\nrg: {path}: Permission denied\nREADME.md",
+        }}]
+        self.assertTrue(runner.skill_activation_evidence(events, "bsp"))
+        self.assertEqual(runner.skill_activation_evidence(events, "bsp", "prefixes.md"), [])
+        events[0]["item"].update(
+            command=f"Get-Content -Encoding utf8 '{path}'; echo README.md",
+            aggregated_output=f"Get-Content : Cannot find path '{path}' because it does not exist.\nREADME.md",
+        )
+        self.assertEqual(runner.skill_activation_evidence(events, "bsp", "prefixes.md"), [])
+
     def test_file_listing_count_and_empty_output_do_not_prove_reference_read(self):
         path = ".agents/skills/bsp/references/prefixes.md"
         for command in (f"rg --files {path}", f"rg -l Префикс {path}",

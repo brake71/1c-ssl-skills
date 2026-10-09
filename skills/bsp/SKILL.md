@@ -39,16 +39,17 @@ presence of BSL files or a form element alone is not an integration task.
    3.1.11 or an unspecified version, select one primary reference from the
    task table. Add a second only for a genuinely cross-cutting task, such as
    printing in a background job.
-2. For an integration/API answer, open the selected reference first;
-   the router and remembered
-   platform knowledge are insufficient. Locate the scenario using `rg -n`
-   headings/keywords, then read its rules, signature, example and pitfalls
-   with native rg context options or Python. If a read fails, retry the
-   absolute reference path built from the `SKILL.md` path you just opened,
-   not another skill directory. If still unreadable, state that the BSP call
-   is unverified instead of guessing it. This step is complete when the
-   proposed answer is checked against that section. Read the whole file only
-   if section reading is unavailable; avoid unrelated material.
+2. Bind the installed root to the parent of the absolute `SKILL.md` file
+   you successfully opened. Build the selected path as
+   `INSTALLED_ROOT/references/REFERENCE.md`; each skill has its own root.
+   Open that file before an integration/API answer. Locate the scenario
+   using native `rg -n` headings/context, then check its rules, signature,
+   example and pitfalls. The router and remembered knowledge are insufficient.
+   If a search fails, run the reference fallback below using that same
+   absolute `SKILL.md` path. A project file listing may omit hidden `.agents/`;
+   it does not prove the installed reference is absent. A system skill's
+   path is not the root of this project skill. Declare the reference
+   unavailable only after the fallback fails; otherwise use its scenario.
 3. If the user proposes a call or rule, check its original full
    `Module.Method` name and purpose. Identify mismatches explicitly. An API
    signature verified for 3.1.11 is not verification for another BSP version.
@@ -71,6 +72,15 @@ The skill is self-contained and needs no developer documentation or source
 export. Resolve `references/` and `scripts/` relative to this installed
 `SKILL.md`, not the project's working directory. `src/cf/` is only an example
 export path, not a consumer project requirement.
+
+## Reference fallback
+
+Replace ABSOLUTE_SKILL_MD with the file you opened (use forward slashes),
+and REFERENCE.md with the selected table entry. This reads independently of cwd:
+
+```bash
+python -X utf8 -c "from pathlib import Path; p=Path('ABSOLUTE_SKILL_MD').parent/'references'/'REFERENCE.md'; print(p.read_text(encoding='utf-8'))"
+```
 
 ## Task routing
 

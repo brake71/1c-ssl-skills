@@ -118,9 +118,11 @@ SKILL.md сохранил ASCII. Сигнатуры/references и глобаль
   injecting её ответ в BSP metadata или принудительная активация скила
   исказили бы проверку. Содержание двух ответов FAIL, граница активации PASS.
 - `connected-command-hook-boundary` #2: модель заявила недоступность справки,
-  отказалась от каркаса и попросила выгрузку. Reference-read marker сам по
-  себе не гарантирует использования сценария. Missing code requirements
-  сохраняют FAIL; один успех majority не превращает этот ответ в верный.
+  отказалась от каркаса и попросила выгрузку. Последующая проверка trace
+  установила: в этом individual run reference-read не засчитан; 26/26 выше
+  является majority по сценариям. Missing code requirements сохраняют FAIL;
+  majority не превращает этот ответ в верный. Диагноз и исправление пути:
+  [P3 reference recovery](p3-reference-recovery-after-p2.md).
 
 Продолжение: отдельно проверить нормализацию reader evidence/ошибочных путей
 на сохранённой trace и устойчивость доступа к reference. Платформенные

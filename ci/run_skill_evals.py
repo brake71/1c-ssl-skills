@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable, Iterator
 
 
@@ -460,6 +460,18 @@ def python_reader_targets(arguments: list[str]) -> list[str]:
             return ("const", node.value)
         if isinstance(node, ast.Name):
             return names.get(node.id)
+        if isinstance(node, ast.Attribute) and node.attr == "parent":
+            source = evaluate(node.value, names)
+            if source and source[0] == "path":
+                return ("path", frozenset(str(PurePosixPath(path.replace("\\", "/")).parent)
+                                         for path in source[1]))
+            return None
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            left, right = evaluate(node.left, names), evaluate(node.right, names)
+            if left and left[0] == "path" and right and right[0] == "const" and isinstance(right[1], str):
+                return ("path", frozenset(str(PurePosixPath(path.replace("\\", "/")) / right[1])
+                                         for path in left[1]))
+            return None
         if isinstance(node, ast.Call):
             func = node.func
             if isinstance(func, ast.Name) and func.id == "Path" and factories["Path"] and node.args:
@@ -631,6 +643,38 @@ def python_reader_targets(arguments: list[str]) -> list[str]:
     return list(dict.fromkeys(targets))
 
 
+def _reader_failure_paths(output: str) -> list[str]:
+    """Extract paths explicitly named by common file-reader failures."""
+    patterns = (
+        re.compile(
+            r"^(?:rg|grep|cat|type|Get-Content|Select-String)\s*:\s*"
+            r"(?P<path>(?:[A-Za-z]:[\\/])?[^:\r\n]+):\s*"
+            r"(?:No such file or directory|Permission denied|Access is denied|"
+            r"Не удается найти|Не удаётся найти|Отказано в доступе|"
+            r"[^\r\n]*\(os error \d+\))",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"^(?:FileNotFoundError|PermissionError):.*?:\s*"
+            r"['\"](?P<path>.+?)['\"]\s*$",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"^(?:Get-Content|Select-String)\s*:\s*Cannot find path\s+"
+            r"['\"](?P<path>.+?)['\"]\s+because\b",
+            re.IGNORECASE,
+        ),
+    )
+    paths = []
+    for line in output.splitlines():
+        for pattern in patterns:
+            match = pattern.match(line.strip())
+            if match:
+                paths.append(match.group("path"))
+                break
+    return paths
+
+
 def skill_activation_evidence(
     events: Iterable[dict], skill_name: str, reference: str | None = None
 ) -> list[str]:
@@ -646,6 +690,17 @@ def skill_activation_evidence(
         path_pattern = re.compile(
             rf"(?<![a-z0-9_.-]){skill_path}"
             rf"(?:skill\.md|references/[a-z0-9_-]+\.md)(?![a-z0-9_.-])"
+        )
+
+    def normalized_target(path: str) -> str:
+        return re.sub(r"/+", "/", path.replace("\\", "/").lower()).removeprefix("./")
+
+    def same_target(left: str, right: str) -> bool:
+        left, right = normalized_target(left), normalized_target(right)
+        return (
+            left == right
+            or left.endswith("/" + right)
+            or right.endswith("/" + left)
         )
 
     evidence = []
@@ -672,6 +727,7 @@ def skill_activation_evidence(
                 body = shell_arguments[command_index + 1]
             except (ValueError, StopIteration, IndexError):
                 continue
+        failure_paths = _reader_failure_paths(str(item.get("aggregated_output", "")))
         for read in READ_COMMAND_RE.finditer(body):
             segment = read_command_segment(body, read.end())
             reader = read.group("reader").lower()
@@ -683,10 +739,19 @@ def skill_activation_evidence(
                     targets = python_reader_targets(shlex.split(segment))
                 elif reader == "select-string" and re.search(r"(?:^|\s)-(?:list|quiet)\b", segment, re.IGNORECASE):
                     continue
+                else:
+                    targets = shlex.split(segment.replace("\\", "/"))
             except ValueError:
                 continue
-            if not any(path_pattern.search(re.sub(r"/+", "/", target.replace("\\", "/").lower()))
-                       for target in targets):
+            matched_targets = [
+                target for target in targets
+                if path_pattern.search(normalized_target(target))
+            ]
+            readable_targets = [
+                target for target in matched_targets
+                if not any(same_target(target, failed_path) for failed_path in failure_paths)
+            ]
+            if not readable_targets:
                 continue
             if command not in evidence:
                 evidence.append(command)
