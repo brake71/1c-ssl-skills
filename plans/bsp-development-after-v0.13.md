@@ -93,6 +93,12 @@ individual quality failures без снижения порогов. Не объ�
 платформенному вызову, не к запуску BSP skill. Покрытие reference 2/24 не
 расширялось. [Отчёт итерации](../reports/bsp-skills/p2-scoring-and-native-activation-after-v0.14.md).
 
+Обновление 2026-10-09 на `5a4a338`: свежий activation 5/6 majority,
+15/18 individual, positive activation 9/9, reference-read 6/6 scoped runs,
+false activation **1/9** (neutral-form-caption #1). Gates PASS, но граница
+caption требует продолжения; прежние 0/9 не являются гарантией устойчивости.
+Покрытие 2/24 не расширено.
+
 1. Три разные отрицательные задачи уже добавлены в v0.14. Сохранять проверки
    правильного ответа и отсутствия активации; расширять границы при наблюдаемом
    пробеле, а не заново добавлять тот же набор. Показывать ложные активации
@@ -127,7 +133,15 @@ GREEN-прогоне все новые и прежние кейсы проход
 оба gate PASS, ошибок проверяемого API БСП/infra 0. Остались один отказ от
 каркаса при заявленной недоступности reference и два platform-only отказа
 activation corpus. Это новые реальные quality failures, не закрытые replay.
-Следующая узкая проверка — reader evidence/ошибочный путь, без снижения gate.
+Проверка reader evidence/ошибочного пути выполнена на `5a4a338`:
+reference root исправлен; masked reader failures защищены unit-регрессиями.
+Свежий guided 27/27, 80/81; hook reference-read 6/6 в targeted/full,
+но targeted quality 2/3 (неверный каркас), full hook quality 3/3.
+Отдельный guided exchange-register-changes #2 пропустил обязательный reference
+при правильном ответе: проверить API-review versus platform-only маршрут.
+Все individual FAIL сохранены. Следующие узкие проверки — hook skeleton
+после чтения, этот scope конфликт и false caption activation; без снижения gate.
+[Reference recovery](../reports/bsp-skills/p3-reference-recovery-after-p2.md).
 
 1. Калибровки v0.14 не считать будущей работой повторно. Для оставшихся и
    новых одиночных отказов различать ошибку ответа, пропуск чтения reference

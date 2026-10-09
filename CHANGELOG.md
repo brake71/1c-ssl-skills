@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-09 — reference recovery после P2 (не выпущено)
+
+- Reference root привязан к прочитанному installed `SKILL.md`; добавлен
+  UTF-8 fallback с проверкой независимости от cwd/системного skill root.
+- Explicit reader failure больше не маскируется успешным listing того же
+  batch; literal Path parent/join учитывается только при наблюдаемом выводе.
+  В исходном P2 отказе reference-read не засчитывался: 26/26 был majority.
+- На `5a4a338` native guided **27/27 majority, 80/81 individual**, activation
+  **5/6, 15/18**; все quality/isolation gates PASS. Hook reference-read 6/6,
+  но targeted quality 2/3, full guided hook 3/3; false activation negatives 1/9.
+  Пять отдельных GREEN FAIL сохранены; пороги/корпуса не менялись.
+- 174 tests PASS, API 664/664, semantic 0/0; fingerprints/isolation независимо
+  перепроверены, known-credential scan 832 файлов PASS, staging/homes удалены.
+  [Результаты, реальные отказы и оговорки](reports/bsp-skills/p3-reference-recovery-after-p2.md).
+
 ## 2026-10-08 — scoring и native activation P2 (не выпущено)
 
 - Четыре сохранённых GREEN false negatives воспроизведены и исправлены:

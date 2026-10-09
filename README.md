@@ -322,6 +322,13 @@ bootstrap сериализован до пула: без этого паралл
 Исторические отчёты не пересчитаны задним числом. Эти изменения не выпущены.
 [Разбор и проверки P2](reports/bsp-skills/p2-scoring-and-native-activation-after-v0.14.md).
 
+После исправления root/reference recovery на `5a4a338`: свежий guided
+**27/27 majority, 80/81 individual**, activation **5/6, 15/18**, оба gate PASS.
+Hook читает reference 6/6 в targeted и полном прогонах, но targeted ответ
+правилен только 2/3; false activation negatives 1/9. Individual FAIL сохранены;
+чтение и majority не равны безошибочному ответу.
+[Reference recovery и ограничения](reports/bsp-skills/p3-reference-recovery-after-p2.md).
+
 ### Native preflight изоляции (без вызова модели)
 
 Для отдельного потребительского **Git-корня вне этого репозитория** можно
