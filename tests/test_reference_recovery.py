@@ -28,6 +28,20 @@ class ReferenceRecoveryTests(unittest.TestCase):
                           "neutral-form-caption", "connected-command-hook-boundary"):
             self.assertNotIn(corpus_id, text)
 
+    def test_discovery_pointer_routes_before_opening_not_from_platform_form_words(self):
+        text = (ROOT / "skills/bsp/SKILL.md").read_text(encoding="ascii")
+        description = json.loads(next(line.removeprefix("description: ")
+                                      for line in text.splitlines() if line.startswith("description: ")))
+        self.assertIn("Scope before opening", description)
+        self.assertIn("migration/update handler", description)
+        self.assertIn("even without a BSP name or version", description)
+        self.assertIn("existing form element properties", description)
+        self.assertIn("without opening this skill", description)
+        self.assertLess(len(description), 780)
+        # Discovery guidance names scenarios, not answers or corpus fixtures.
+        self.assertNotIn("ЗаписатьДанные", description)
+        self.assertNotIn("Заголовок", description)
+
     def test_failed_system_path_and_listing_do_not_prove_reference_read(self):
         events = [{"type": "item.completed", "item": {
             "type": "command_execution", "exit_code": 0,
