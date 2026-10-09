@@ -665,8 +665,11 @@ def _reader_failure_paths(output: str) -> list[str]:
             re.IGNORECASE,
         ),
     )
+    # PowerShell colours stderr even with capture_output; normalize diagnostics only.
+    # Keep the original tool output/commands intact for receipts and other checks.
+    diagnostic_output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output)
     paths = []
-    for line in output.splitlines():
+    for line in diagnostic_output.splitlines():
         for pattern in patterns:
             match = pattern.match(line.strip())
             if match:

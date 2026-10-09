@@ -1,0 +1,347 @@
+{
+  "version": "review-r2-v1",
+  "full_baseline": false,
+  "model": "gpt-6-luna",
+  "reasoning_effort": "medium",
+  "stages": [
+    {
+      "report": ".tmp/review-r2-v1-smoke.json",
+      "report_sha256": "fa6d29b8790ad3e3b781ba851e2b8a9cf3d1a8e8912d766c71a574db1df8cd76",
+      "fixture_receipt": ".tmp/review-r2-v1-smoke-fixture.json",
+      "fixture_receipt_sha256": "1196ab833b3cf62ca10ddfb7ce2a83aecd67d1068f4a1b4d70cb3d1ecf070e52",
+      "before_at": "2026-10-09T05:49:16.453169+00:00",
+      "after_at": "2026-10-09T05:49:58.968302+00:00",
+      "exclusions": [
+        ".git metadata",
+        "exact .agents/skills/bsp stage (separate inventory gate)"
+      ],
+      "before_manifest": [
+        {
+          "path": "README.md",
+          "size": 167,
+          "sha256": "c67151f18f24bc0cd8c6d16c261d4430da0abde4b08e184bfb3d5081c7db5d75"
+        }
+      ],
+      "after_manifest": [
+        {
+          "path": "README.md",
+          "size": 167,
+          "sha256": "c67151f18f24bc0cd8c6d16c261d4430da0abde4b08e184bfb3d5081c7db5d75"
+        }
+      ],
+      "fixture_unchanged": true,
+      "source_auth_bytes_unchanged": true,
+      "cleanup_valid": true,
+      "fingerprints_match": true,
+      "fingerprints": {
+        "runner_sha256": "ea0ddb29a0edb80b3973e76a975238a66f0eb75d8309f687f0ddf9fb281e0a0f",
+        "skill_sha256": "b4db1c7a3362d4453883a9809bf784072f54a5ea4cb2a99649a935ca9a6e2e63",
+        "native_helper_sha256": "b55c120eeebc526c8ea268a41167d4cd4c0769581c30884354202634d2b6c588",
+        "native_probe_sha256": "954e5549503700ad307546612053b3a9a7b54a1595cbf18ddf659719124098da",
+        "corpus_sha256": "7a5955734f4e26ccc7f9c69d4a8f442dcc91de43ef51888abb675a7045af2366",
+        "reference_matrix_sha256": "cd0f5a6908fd0f0c0dd1c64890768633f63d2b7f2a3110cf92de53ac9192d6bb"
+      },
+      "gate": {
+        "passed": true,
+        "reasons": []
+      },
+      "isolation_gate": {
+        "profile": "native-runtime-v1",
+        "passed": true,
+        "reasons": []
+      },
+      "individual_runs": {
+        "red": {
+          "message-bound-to-field": [
+            {
+              "passed": false,
+              "activated": false,
+              "reference_read": false,
+              "status": "quality_failed"
+            }
+          ]
+        },
+        "green": {
+          "message-bound-to-field": [
+            {
+              "passed": true,
+              "activated": true,
+              "reference_read": true,
+              "status": "completed"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "report": ".tmp/review-r2-v1-guided-targeted-3x.json",
+      "report_sha256": "a5f4cee8450c691bae5c7c4ae4d72e4da2d8df7a822d1a019387a12e05df1555",
+      "fixture_receipt": ".tmp/review-r2-v1-guided-targeted-3x-fixture.json",
+      "fixture_receipt_sha256": "6af95cfa47f50cd97060cc735290f3ed8bc619269f0110efe79a5b94f16955b3",
+      "before_at": "2026-10-09T05:50:04.379507+00:00",
+      "after_at": "2026-10-09T05:51:02.409677+00:00",
+      "exclusions": [
+        ".git metadata",
+        "exact .agents/skills/bsp stage (separate inventory gate)"
+      ],
+      "before_manifest": [
+        {
+          "path": "README.md",
+          "size": 167,
+          "sha256": "c67151f18f24bc0cd8c6d16c261d4430da0abde4b08e184bfb3d5081c7db5d75"
+        }
+      ],
+      "after_manifest": [
+        {
+          "path": "README.md",
+          "size": 167,
+          "sha256": "c67151f18f24bc0cd8c6d16c261d4430da0abde4b08e184bfb3d5081c7db5d75"
+        }
+      ],
+      "fixture_unchanged": true,
+      "source_auth_bytes_unchanged": true,
+      "cleanup_valid": true,
+      "fingerprints_match": true,
+      "fingerprints": {
+        "runner_sha256": "ea0ddb29a0edb80b3973e76a975238a66f0eb75d8309f687f0ddf9fb281e0a0f",
+        "skill_sha256": "b4db1c7a3362d4453883a9809bf784072f54a5ea4cb2a99649a935ca9a6e2e63",
+        "native_helper_sha256": "b55c120eeebc526c8ea268a41167d4cd4c0769581c30884354202634d2b6c588",
+        "native_probe_sha256": "954e5549503700ad307546612053b3a9a7b54a1595cbf18ddf659719124098da",
+        "corpus_sha256": "7a5955734f4e26ccc7f9c69d4a8f442dcc91de43ef51888abb675a7045af2366",
+        "reference_matrix_sha256": "cd0f5a6908fd0f0c0dd1c64890768633f63d2b7f2a3110cf92de53ac9192d6bb"
+      },
+      "gate": {
+        "passed": true,
+        "reasons": []
+      },
+      "isolation_gate": {
+        "profile": "native-runtime-v1",
+        "passed": true,
+        "reasons": []
+      },
+      "individual_runs": {
+        "red": {
+          "exchange-register-changes": [
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            },
+            {
+              "passed": false,
+              "activated": false,
+              "reference_read": false,
+              "status": "quality_failed"
+            },
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            }
+          ],
+          "connected-command-hook-boundary": [
+            {
+              "passed": false,
+              "activated": false,
+              "reference_read": false,
+              "status": "quality_failed"
+            },
+            {
+              "passed": false,
+              "activated": false,
+              "reference_read": false,
+              "status": "quality_failed"
+            },
+            {
+              "passed": false,
+              "activated": false,
+              "reference_read": false,
+              "status": "quality_failed"
+            }
+          ]
+        },
+        "green": {
+          "exchange-register-changes": [
+            {
+              "passed": true,
+              "activated": true,
+              "reference_read": true,
+              "status": "completed"
+            },
+            {
+              "passed": true,
+              "activated": true,
+              "reference_read": true,
+              "status": "completed"
+            },
+            {
+              "passed": true,
+              "activated": true,
+              "reference_read": true,
+              "status": "completed"
+            }
+          ],
+          "connected-command-hook-boundary": [
+            {
+              "passed": true,
+              "activated": true,
+              "reference_read": true,
+              "status": "completed"
+            },
+            {
+              "passed": true,
+              "activated": true,
+              "reference_read": true,
+              "status": "completed"
+            },
+            {
+              "passed": true,
+              "activated": true,
+              "reference_read": true,
+              "status": "completed"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "report": ".tmp/review-r2-v1-activation-targeted-3x.json",
+      "report_sha256": "470542bfff3cb12e17fd2ad2fcf8bd3624d808b0cb9fc9241a38dffd20e7044a",
+      "fixture_receipt": ".tmp/review-r2-v1-activation-targeted-3x-fixture.json",
+      "fixture_receipt_sha256": "b59a0e409650ede948ea195f197ae8265504ad9ca4f54b1513e732eec26845cf",
+      "before_at": "2026-10-09T05:51:08.735186+00:00",
+      "after_at": "2026-10-09T05:51:34.304755+00:00",
+      "exclusions": [
+        ".git metadata",
+        "exact .agents/skills/bsp stage (separate inventory gate)"
+      ],
+      "before_manifest": [
+        {
+          "path": "README.md",
+          "size": 167,
+          "sha256": "c67151f18f24bc0cd8c6d16c261d4430da0abde4b08e184bfb3d5081c7db5d75"
+        }
+      ],
+      "after_manifest": [
+        {
+          "path": "README.md",
+          "size": 167,
+          "sha256": "c67151f18f24bc0cd8c6d16c261d4430da0abde4b08e184bfb3d5081c7db5d75"
+        }
+      ],
+      "fixture_unchanged": true,
+      "source_auth_bytes_unchanged": true,
+      "cleanup_valid": true,
+      "fingerprints_match": true,
+      "fingerprints": {
+        "runner_sha256": "ea0ddb29a0edb80b3973e76a975238a66f0eb75d8309f687f0ddf9fb281e0a0f",
+        "skill_sha256": "b4db1c7a3362d4453883a9809bf784072f54a5ea4cb2a99649a935ca9a6e2e63",
+        "native_helper_sha256": "b55c120eeebc526c8ea268a41167d4cd4c0769581c30884354202634d2b6c588",
+        "native_probe_sha256": "954e5549503700ad307546612053b3a9a7b54a1595cbf18ddf659719124098da",
+        "corpus_sha256": "41a893295278e3a1a240e7857a342fa9313c332b5ce12c982fd791fcb5d35e3d",
+        "reference_matrix_sha256": "3b16cc5680871f16b22d9fe78ac4fc257ad484681985b81dd957436a56908d68"
+      },
+      "gate": {
+        "passed": true,
+        "reasons": []
+      },
+      "isolation_gate": {
+        "profile": "native-runtime-v1",
+        "passed": true,
+        "reasons": []
+      },
+      "individual_runs": {
+        "red": {
+          "neutral-platform-exchange-registration": [
+            {
+              "passed": false,
+              "activated": false,
+              "reference_read": false,
+              "status": "quality_failed"
+            },
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            },
+            {
+              "passed": false,
+              "activated": false,
+              "reference_read": false,
+              "status": "quality_failed"
+            }
+          ],
+          "neutral-form-caption": [
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            },
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            },
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            }
+          ]
+        },
+        "green": {
+          "neutral-platform-exchange-registration": [
+            {
+              "passed": false,
+              "activated": false,
+              "reference_read": false,
+              "status": "quality_failed"
+            },
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            },
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            }
+          ],
+          "neutral-form-caption": [
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            },
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            },
+            {
+              "passed": true,
+              "activated": false,
+              "reference_read": false,
+              "status": "completed"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "known_credential_scan": {
+    "files": 113,
+    "matches": 0
+  }
+}

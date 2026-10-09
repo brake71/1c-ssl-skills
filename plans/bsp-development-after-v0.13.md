@@ -30,7 +30,12 @@
 
 ## P0 — чистая и воспроизводимая база сравнений
 
-**Статус на 2026-10-08: закрыт для `native-runtime-v1` профиля.**
+**Статус runtime inventory на 2026-10-08: закрыт для `native-runtime-v1`.**
+Уточнение по ревью 2026-10-09: это не полное закрытие P0. Обычные consumer-файлы
+не входят в isolation gate/resume fingerprints. Сохранённые RED/GREEN чтения
+README проверены отдельно; текущие состав/хеш fixture зафиксированы, но полного
+исторического manifest нет. Критерий воспроизводимости fixture остаётся открытым.
+[Аудит, evidence и порядок resume](../reports/bsp-skills/v0.14-0749271-review-followup.md).
 Для стандартного/исторического `exec` ограничение остаётся; результаты туда
 не переносятся. Добавлен
 `ci/probe_eval_isolation.py`: native preflight без model turns, с отдельным
@@ -71,7 +76,13 @@ individual quality failures без снижения порогов. Не объ�
 2. RED и GREEN проводить на одних модели, effort, задаче и рабочем каталоге;
    единственное запланированное отличие — staged `bsp` в GREEN. Сохранять
    fingerprint скила, runner, корпуса и матрицы; проверять доступный
-   skill catalog, а не только факт чтения файла. Инфраструктурные ошибки не
+   skill catalog, а не только факт чтения файла. Отдельно сохранять manifest
+   обычных fixture-файлов до RED и после cleanup, вручную проверять их
+   нейтральность и фактический вывод чтений. Перед resume сравнить fixture с
+   исходным manifest; неизменность workdir path не доказывает неизменности
+   содержимого. При отсутствии исходного manifest не объявлять его доказанным
+   задним числом: inventory resume PASS остаётся ограниченным этим профилем.
+   Инфраструктурные ошибки не
    пересчитывать в успешные ответы. Не сравнивать результаты разных моделей,
    изменений evaluator, assisted и guidance-free профилей как один эксперимент.
 3. Для нового baseline использовать опубликованный распакованный v0.14
@@ -142,6 +153,16 @@ reference root исправлен; masked reader failures защищены unit-
 Все individual FAIL сохранены. Следующие узкие проверки — hook skeleton
 после чтения, этот scope конфликт и false caption activation; без снижения gate.
 [Reference recovery](../reports/bsp-skills/p3-reference-recovery-after-p2.md).
+
+Повторное ревью 2026-10-09: в рабочем router явно приоритизирован explicit BSP
+API review даже при платформенном решении; standalone platform-only без него
+остаётся вне scope. Свежий targeted native: API-review exchange 3/3 с чтением,
+hook 3/3 с чтением, caption 3/3 без BSP; standalone exchange 2/3 без BSP во всех
+runs. Сохранён один неверный платформенный ответ. Prospective ordinary fixture
+manifests до/после всех трёх запусков совпали; обе gate PASS, infra 0.
+Это не полный baseline и не устранение всех будущих stochastic ошибок;
+исторические FAIL и coverage 2/24 сохраняются.
+[Версия, все individual outcomes и receipts](../reports/bsp-skills/v0.14-0749271-review-followup.md).
 
 1. Калибровки v0.14 не считать будущей работой повторно. Для оставшихся и
    новых одиночных отказов различать ошибку ответа, пропуск чтения reference

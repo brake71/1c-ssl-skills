@@ -413,6 +413,49 @@ class JsonlTests(unittest.TestCase):
         )
         self.assertEqual(runner.skill_activation_evidence(events, "bsp", "prefixes.md"), [])
 
+    def test_powershell_ansi_failure_is_not_reference_read_despite_batch_exit_zero(self):
+        path = ".agents/skills/bsp/references/prefixes.md"
+        # PowerShell 7 stderr from Get-Content; the later echo supplies stdout/exit 0.
+        output = (
+            "README.md\n\x1b[31;1mGet-Content: \x1b[31;1mCannot find path "
+            "'C:\\fixture\\.agents\\skills\\bsp\\references\\prefixes.md' "
+            "because it does not exist.\x1b[0m\n"
+        )
+        event = {"type": "item.completed", "item": {
+            "type": "command_execution", "exit_code": 0,
+            "command": f"Get-Content -Encoding utf8 '{path}'; echo README.md",
+            "aggregated_output": output,
+        }}
+        self.assertEqual(runner.skill_activation_evidence([event], "bsp", "prefixes.md"), [])
+        # Diagnostics may also insert colour sequences inside the pathname.
+        event["item"]["aggregated_output"] = output.replace("prefixes.md", "prefix\x1b[0m\x1b[31;1mes.md")
+        self.assertEqual(runner.skill_activation_evidence([event], "bsp", "prefixes.md"), [])
+        self.assertEqual(event["item"]["aggregated_output"].count("\x1b"), 5)
+
+    def test_powershell_ansi_success_other_target_and_independent_retry(self):
+        path = ".agents/skills/bsp/references/prefixes.md"
+        good = {"type": "item.completed", "item": {
+            "type": "command_execution", "exit_code": 0,
+            "command": f"Get-Content -Encoding utf8 '{path}'",
+            "aggregated_output": "\x1b[32m# Префиксы\x1b[0m\nПравила и пример.",
+        }}
+        self.assertEqual(len(runner.skill_activation_evidence([good], "bsp", "prefixes.md")), 1)
+        for name in ("other.md", "prefixes.md.bak", "prefixes.md"):
+            diagnostic = (
+                "\x1b[31;1mGet-Content: \x1b[31;1mCannot find path "
+                f"'C:/fixture/.agents/skills/bsp/references/{name}' "
+                "because it does not exist.\x1b[0m\n"
+            )
+            batch = {"type": "item.completed", "item": {
+                **good["item"], "command": f"{good['item']['command']}; echo README.md",
+                "aggregated_output": good["item"]["aggregated_output"] + "\n" + diagnostic,
+            }}
+            with self.subTest(failed_target=name):
+                evidence = runner.skill_activation_evidence([batch], "bsp", "prefixes.md")
+                self.assertEqual(bool(evidence), name != "prefixes.md")
+        self.assertEqual(runner.skill_activation_evidence([batch, good], "bsp", "prefixes.md"),
+                         [good["item"]["command"]])
+
     def test_file_listing_count_and_empty_output_do_not_prove_reference_read(self):
         path = ".agents/skills/bsp/references/prefixes.md"
         for command in (f"rg --files {path}", f"rg -l Префикс {path}",

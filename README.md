@@ -310,9 +310,14 @@ bootstrap сериализован до пула: без этого паралл
 падать в новом home ещё до inventory. Bootstrap также проверяется gate.
 
 Свежий native baseline: GREEN 27/27 majority, 77/81 individual, оба gate PASS,
-без API/process/infra ошибок GREEN. P0 закрыт **только для этого профиля**;
-четыре individual quality failures остались в отчёте. Стандартный/исторический
-`exec` и native activation corpus этим результатом не проверены.
+без API/process/infra ошибок GREEN. P0 — приоритет «чистая и воспроизводимая
+база сравнений» — закрыт **в части runtime inventory этого профиля**;
+четыре individual quality failures остались в отчёте. `isolation_gate` не
+проверяет нейтральность/неизменность обычных consumer-файлов. Ретроспективный
+аудит подтвердил нейтральный текст README в наблюдаемых RED/GREEN чтениях,
+но полного исторического file manifest нет: этот критерий P0 остаётся открытым.
+Стандартный/исторический `exec` и native activation corpus этим baseline
+не проверены. [Аудит fixture и ограничения resume](reports/bsp-skills/v0.14-0749271-review-followup.md).
 [История commit/run/fix/rerun](reports/bsp-skills/p0-native-runtime-loop-after-v0.14.md).
 
 После P2-калибровки evaluator и metadata выполнены **отдельные свежие** native
@@ -354,8 +359,9 @@ fingerprints, но не raw config и не credentials.
 
 **Это отдельный app-server профиль, не inventory реальных `exec`-запусков.**
 PASS preflight не закрывает P0, не является behavioral gate и не усиливает
-результаты прежних релизов. Следующий шаг — inventory в том же процессе,
-который выполняет поведенческий turn. [Результат и ограничения пробы](reports/bsp-skills/p0-native-preflight-after-v0.14.md).
+результаты прежних релизов. Inventory в процессе поведенческого turn уже
+реализован в описанном выше `native-runtime-v1`; отдельный preflight его не
+заменяет. [Результат и исторические ограничения пробы](reports/bsp-skills/p0-native-preflight-after-v0.14.md).
 
 ## Лицензия
 

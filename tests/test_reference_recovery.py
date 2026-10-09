@@ -1,4 +1,5 @@
 """Regression for a project BSP reference resolved from another system skill."""
+import json
 import re
 import shlex
 import subprocess
@@ -13,6 +14,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReferenceRecoveryTests(unittest.TestCase):
+    def test_router_prioritizes_explicit_api_review_without_widening_platform_scope(self):
+        text = (ROOT / "skills/bsp/SKILL.md").read_text(encoding="ascii")
+        description = json.loads(next(line.removeprefix("description: ")
+                                      for line in text.splitlines() if line.startswith("description: ")))
+        self.assertIn("Explicit BSP API review, including method existence", description)
+        self.assertIn("platform-only exclusion applies only without BSP API review", description)
+        scope = " ".join(text.split("Scope precedence:", 1)[1].split("1. Check", 1)[0].split())
+        self.assertIn("requires the selected reference even when the recommendation uses platform APIs", scope)
+        self.assertIn("Apply the version boundary below first", scope)
+        self.assertIn("Standalone platform-only requests without BSP API review are outside", scope)
+        for corpus_id in ("exchange-register-changes", "neutral-platform-exchange-registration",
+                          "neutral-form-caption", "connected-command-hook-boundary"):
+            self.assertNotIn(corpus_id, text)
+
     def test_failed_system_path_and_listing_do_not_prove_reference_read(self):
         events = [{"type": "item.completed", "item": {
             "type": "command_execution", "exit_code": 0,

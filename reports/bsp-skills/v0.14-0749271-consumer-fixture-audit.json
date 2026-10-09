@@ -1,0 +1,169 @@
+{
+  "audit_kind": "retrospective manual audit, not a runner gate",
+  "recorded_at": "2026-10-09T05:37:13.502826+00:00",
+  "consumer": "$CONSUMER (workdir of referenced reports)",
+  "current_ordinary_fixture": [
+    {
+      "path": "README.md",
+      "bytes": 167,
+      "sha256": "c67151f18f24bc0cd8c6d16c261d4430da0abde4b08e184bfb3d5081c7db5d75"
+    }
+  ],
+  "inventory_exclusion": ".git metadata only; no claim about all model-readable host paths",
+  "current_readme_text": "# Прикладной проект 1С\n\nРабочий проект для разработки управляемых форм и прикладной логики.\n",
+  "full_historical_fixture_manifest_available": false,
+  "historical_projection_is_not_a_byte_hash_or_complete_file_inventory": true,
+  "observed_read_policy": "successful explicit rg -n . README.md; matching numbered nonempty lines in output; listings/search snippets are not counted",
+  "reports": [
+    {
+      "report": ".tmp/native-runtime-guided-full-r2-3x.json",
+      "report_sha256": "81e09bc552dc47ef91050eeb381fb868effb83000859904462e23f7f82d055c3",
+      "phases": {
+        "red": {
+          "matching_readme_projection_events": 47,
+          "witness": {
+            "artifact": ".tmp/native-runtime-guided-full-r2-3x-artifacts/backup-public-boundary.red.1.jsonl",
+            "artifact_sha256": "90475ec5f5a9e0d70fb57e3aceef1d8934af000e3114c8535e0f043cf5858016",
+            "jsonl_line": 2,
+            "exit_code": 0,
+            "command": "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -NoProfile -Command 'rg -n . -- README.md'",
+            "numbered_nonempty_readme_lines": {
+              "1": "# Прикладной проект 1С",
+              "3": "Рабочий проект для разработки управляемых форм и прикладной логики."
+            }
+          }
+        },
+        "green": {
+          "matching_readme_projection_events": 11,
+          "witness": {
+            "artifact": ".tmp/native-runtime-guided-full-r2-3x-artifacts/bp-redirect-public-boundary.green.1.jsonl",
+            "artifact_sha256": "8283a7fb447e27a317be92bfe401262a1a07921a25cd728ba82adf37c1e870bb",
+            "jsonl_line": 2,
+            "exit_code": 0,
+            "command": "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -NoProfile -Command 'rg -n . -- README.md'",
+            "numbered_nonempty_readme_lines": {
+              "1": "# Прикладной проект 1С",
+              "3": "Рабочий проект для разработки управляемых форм и прикладной логики."
+            }
+          }
+        }
+      }
+    },
+    {
+      "report": ".tmp/native-guided-after-p2-r1-3x.json",
+      "report_sha256": "c6c3f706a3e22468a73b0ae233363db27469fee04b8632edb19e1157cfba3549",
+      "phases": {
+        "red": {
+          "matching_readme_projection_events": 47,
+          "witness": {
+            "artifact": ".tmp/native-guided-after-p2-r1-3x-artifacts/backup-public-boundary.red.1.jsonl",
+            "artifact_sha256": "4fa19c7d58449074356e5576f5e25cc3243accde729b0a6323c0c29224ccae23",
+            "jsonl_line": 3,
+            "exit_code": 0,
+            "command": "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -NoProfile -Command 'rg -n . -- README.md'",
+            "numbered_nonempty_readme_lines": {
+              "1": "# Прикладной проект 1С",
+              "3": "Рабочий проект для разработки управляемых форм и прикладной логики."
+            }
+          }
+        },
+        "green": {
+          "matching_readme_projection_events": 1,
+          "witness": {
+            "artifact": ".tmp/native-guided-after-p2-r1-3x-artifacts/connected-command-hook-boundary.green.1.jsonl",
+            "artifact_sha256": "33f4a9090572bbb0e7310bb9a2d9d95845e6f2b6d97602336e698918977e13b4",
+            "jsonl_line": 2,
+            "exit_code": 0,
+            "command": "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -NoProfile -Command 'rg -n . -- $CONSUMER/README.md $CONSUMER/.agents/skills/bsp/SKILL.md'",
+            "numbered_nonempty_readme_lines": {
+              "1": "# Прикладной проект 1С",
+              "3": "Рабочий проект для разработки управляемых форм и прикладной логики."
+            }
+          }
+        }
+      }
+    },
+    {
+      "report": ".tmp/native-activation-after-p2-r3-3x.json",
+      "report_sha256": "2695573377a5c57e90db254c3c7d1a25117600326262ca2b6cb81cb9649d7b22",
+      "phases": {
+        "red": {
+          "matching_readme_projection_events": 1,
+          "witness": {
+            "artifact": ".tmp/native-activation-after-p2-r3-3x-artifacts/neutral-form-caption.red.3.jsonl",
+            "artifact_sha256": "45514f457b9e7869166035f925204f85601f6001cab1b29bac7f694c784d7752",
+            "jsonl_line": 2,
+            "exit_code": 0,
+            "command": "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -NoProfile -Command 'rg -n . -- README.md'",
+            "numbered_nonempty_readme_lines": {
+              "1": "# Прикладной проект 1С",
+              "3": "Рабочий проект для разработки управляемых форм и прикладной логики."
+            }
+          }
+        },
+        "green": {
+          "matching_readme_projection_events": 0,
+          "witness": null
+        }
+      }
+    },
+    {
+      "report": ".tmp/native-reference-recovery-guided-3x.json",
+      "report_sha256": "3f1657fd24d71e16ba0a273f38913685904a0fce1287da56eadabb1b43c9befd",
+      "phases": {
+        "red": {
+          "matching_readme_projection_events": 55,
+          "witness": {
+            "artifact": ".tmp/native-reference-recovery-guided-3x-artifacts/backup-public-boundary.red.1.jsonl",
+            "artifact_sha256": "c24bd50ec62f968990e97d2ca3124f04701a6d242fb963fdc97bf913d03ae33f",
+            "jsonl_line": 2,
+            "exit_code": 0,
+            "command": "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -NoProfile -Command 'rg -n . -- README.md'",
+            "numbered_nonempty_readme_lines": {
+              "1": "# Прикладной проект 1С",
+              "3": "Рабочий проект для разработки управляемых форм и прикладной логики."
+            }
+          }
+        },
+        "green": {
+          "matching_readme_projection_events": 4,
+          "witness": {
+            "artifact": ".tmp/native-reference-recovery-guided-3x-artifacts/backup-public-boundary.green.2.jsonl",
+            "artifact_sha256": "9d21c2905eec0b4895a1c8f86a7d2417bd63e7b3eec9e6a15ee72d889a48c246",
+            "jsonl_line": 2,
+            "exit_code": 0,
+            "command": "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -NoProfile -Command 'rg -n . -- README.md'",
+            "numbered_nonempty_readme_lines": {
+              "1": "# Прикладной проект 1С",
+              "3": "Рабочий проект для разработки управляемых форм и прикладной логики."
+            }
+          }
+        }
+      }
+    },
+    {
+      "report": ".tmp/native-reference-recovery-activation-3x.json",
+      "report_sha256": "8d2a383972f930c48d7ad2863c5ff52bde31bf985a10ae95812881548b3693ab",
+      "phases": {
+        "red": {
+          "matching_readme_projection_events": 2,
+          "witness": {
+            "artifact": ".tmp/native-reference-recovery-activation-3x-artifacts/neutral-form-caption.red.1.jsonl",
+            "artifact_sha256": "93a5032c032b448acea17db517fd4d1ec7e4137729c808553e88173b992b865a",
+            "jsonl_line": 2,
+            "exit_code": 0,
+            "command": "\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -NoProfile -Command 'rg -n . -- README.md'",
+            "numbered_nonempty_readme_lines": {
+              "1": "# Прикладной проект 1С",
+              "3": "Рабочий проект для разработки управляемых форм и прикладной логики."
+            }
+          }
+        },
+        "green": {
+          "matching_readme_projection_events": 0,
+          "witness": null
+        }
+      }
+    }
+  ]
+}

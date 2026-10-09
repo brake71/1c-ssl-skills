@@ -2,9 +2,14 @@
 
 Дата: 2026-10-08. Новый профиль `native-runtime-v1`, не эквивалентный
 историческому `exec`. Скил v0.14 и quality thresholds не менялись.
-**P0 закрыт для контролируемого `native-runtime-v1` профиля:** свежий полный
-baseline и оба gate PASS. Исторический/стандартный `exec` не получает этого
-доказательства; его ограничения остаются.
+**Runtime-inventory часть P0 закрыта для `native-runtime-v1`:** свежий полный
+baseline и оба gate PASS. Уточнение по ревью 2026-10-09: обычные consumer-файлы
+не входят в inventory gate. Отдельный ретроспективный аудит подтвердил
+нейтральный текст наблюдаемых RED/GREEN чтений README, но полного исторического
+manifest нет; закрытие всех критериев P0 не доказано.
+[Fixture audit и границы resume](v0.14-0749271-review-followup.md).
+Исторический/стандартный `exec` не получает native доказательства;
+его ограничения остаются. Числа и исходные behavioral reports ниже не изменены.
 
 ## Зафиксированные итерации
 
@@ -144,7 +149,11 @@ Resume schema v5 связывает corpus/matrix/skill/runner/transport helpers
 профиль, модель/effort, workdir, account identity и пороги. Account identity —
 не fingerprint токенов; managed refresh private auth не меняет исходный файл.
 Временные пути system-метаданных нормализованы, чтобы новый disposable home
-не создавал ложного изменения catalog при resume.
+не создавал ложного изменения catalog при resume. Обычное содержимое consumer
+не связано этими fingerprints: сохранённый PASS resume не доказывает
+неизменности README/fixture. Для следующих baseline/resume требуется отдельный
+исходный manifest и его повторная сверка; текущий snapshot не восстанавливает
+отсутствовавший исторический manifest.
 
 ## Ограничения и следующий шаг
 
