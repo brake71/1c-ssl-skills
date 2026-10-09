@@ -64,3 +64,7 @@ false-PASS control. Не повторяем a2ef091 ради PASS, не меня
 матрицы, пороги или forbidden/code requirements; старые FAIL сохранены.
 Пока результаты следующего smoke/full guided/full activation здесь не заявлены.
 Без push/release, глобальных skill/auth изменений и изменений vendor.
+
+Продолжение: [свежая полная native проверка a728b0b](a728b0b-native-full-verification.md).
+Guided 81/81 PASS; smoke и activation quality gates FAIL. Эти результаты
+сохранены отдельно и не заменяют partial a2ef091 evidence или offline replay.
