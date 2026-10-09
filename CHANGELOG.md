@@ -1,6 +1,6 @@
 # Changelog
 
-## После v0.14 — discovery и проверка кандидата (не выпущено)
+## v0.15 — native isolation, discovery и проверка поставки
 
 - Scope определяется до открытия skill: explicit BSP API review имеет
   приоритет; библиотечная миграция/обработчик обновления требует маршрута
@@ -21,7 +21,8 @@
 - 191 tests PASS до/после, API 664/664, semantic ERROR/WARN 0/0. Parent
   независимо перепроверил 200 scores и raw reader evidence, fixtures/auth/
   fingerprints/cleanup; known-credential scans 809 + 531 файлов, 0 совпадений.
-  Тег, push и публикация не выполнялись. README/workflow/поставка согласованы.
+  На этапе проверки кандидата тег, push и публикация не выполнялись.
+  README/workflow/поставка согласованы; v0.15 поставляет те же проверенные байты.
   [Подробная проверка кандидата и ограничения](reports/bsp-skills/7b1abc7-release-candidate-readiness.md).
 
 ## 2026-10-09 — reference recovery после P2 (не выпущено)

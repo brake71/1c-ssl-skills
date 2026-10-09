@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.
 Чтобы установить конкретный тег или коммит, передайте `--ref`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.14
+curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.15
 ```
 
 Если не хочется выполнять загруженный код через pipe, сначала сохраните и
@@ -59,7 +59,7 @@ irm https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.ps1 -Ou
 .\install.ps1 -Agent Codex
 .\install.ps1 -Agent OpenCode
 .\install.ps1 -Target C:\path\to\skills
-.\install.ps1 -Agent Codex -Ref v0.14
+.\install.ps1 -Agent Codex -Ref v0.15
 Remove-Item .\install.ps1
 ```
 
@@ -156,7 +156,7 @@ Windows, незакоммиченные изменения и Python cache не 
 подготовленное Git-дерево через `--ref`. Тег и сеть для сборки не нужны:
 
 ```bash
-python ci/build_release.py --ref HEAD --version v0.14 --output-dir .tmp/v0.14-candidate
+python ci/build_release.py --ref HEAD --version v0.15 --output-dir .tmp/v0.15-candidate
 ```
 
 Выходной каталог должен быть новым. В нём — ZIP, tar.gz, распакованный
@@ -334,7 +334,7 @@ Hook читает reference 6/6 в targeted и полном прогонах, н
 чтение и majority не равны безошибочному ответу.
 [Reference recovery и ограничения](reports/bsp-skills/p3-reference-recovery-after-p2.md).
 
-Текущий **локальный, не опубликованный** кандидат `v0.15-rc1` из `7b1abc7`:
+При подготовке **v0.15** проверен локальный кандидат `v0.15-rc1` из `7b1abc7`:
 детерминированная упаковка и оба упакованных установщика PASS. Отдельные
 native-прогоны реально распакованного ZIP: smoke **1/1**, guided **27/27
 majority, 78/81 individual**, activation **6/6, 18/18**; все quality/isolation
