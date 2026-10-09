@@ -334,6 +334,16 @@ Hook читает reference 6/6 в targeted и полном прогонах, н
 чтение и majority не равны безошибочному ответу.
 [Reference recovery и ограничения](reports/bsp-skills/p3-reference-recovery-after-p2.md).
 
+Текущий **локальный, не опубликованный** кандидат `v0.15-rc1` из `7b1abc7`:
+детерминированная упаковка и оба упакованных установщика PASS. Отдельные
+native-прогоны реально распакованного ZIP: smoke **1/1**, guided **27/27
+majority, 78/81 individual**, activation **6/6, 18/18**; все quality/isolation
+gates PASS. Guided strict reference-read **76/78**, false activation **0/3**;
+activation positive/read **9/9 и 6/6**, false activation **0/9**. Три guided
+individual FAIL сохранены; это не исправление исторических платформенных
+ошибок и не полное activation coverage (2/24 references).
+[Проверка поставки, raw FAIL и ограничения](reports/bsp-skills/7b1abc7-release-candidate-readiness.md).
+
 ### Native preflight изоляции (без вызова модели)
 
 Для отдельного потребительского **Git-корня вне этого репозитория** можно

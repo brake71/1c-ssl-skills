@@ -1,5 +1,29 @@
 # Changelog
 
+## После v0.14 — discovery и проверка кандидата (не выпущено)
+
+- Scope определяется до открытия skill: explicit BSP API review имеет
+  приоритет; библиотечная миграция/обработчик обновления требует маршрута
+  даже без имени БСП. Чистые платформенные задачи не открывают skill.
+- Уточнены reader evidence и bounded wording criteria с paired controls;
+  сохранены реальные FAIL и старые отчёты, пороги не снижены. На `2c2ba52`
+  четыре отдельных native этапа прошли gates при guided 79/81 individual
+  и full activation 15/18; не объявляются безошибочными.
+- Локальный `v0.15-rc1` из `7b1abc7` собран дважды побайтно одинаково:
+  ZIP/tar.gz по 29 файлов, 24 references, без локальных BSP sources,
+  vendor/cache/credentials. Оба упакованных установщика: 12 первых
+  установок, 12 обновлений, 24 безопасных отказа без сети и глобальных путей.
+- Отдельные свежие native-прогоны именно распакованного ZIP: smoke 1/1,
+  guided **27/27 majority, 78/81 individual**, activation **6/6, 18/18**;
+  все quality/isolation gates PASS. Guided strict read 76/78, activation
+  positive/read 9/9 и 6/6; false activation 0/3 и 0/9. Три guided FAIL
+  сохранены (wording и mixed-reader exit 1); activation coverage 2/24.
+- 191 tests PASS до/после, API 664/664, semantic ERROR/WARN 0/0. Parent
+  независимо перепроверил 200 scores и raw reader evidence, fixtures/auth/
+  fingerprints/cleanup; known-credential scans 809 + 531 файлов, 0 совпадений.
+  Тег, push и публикация не выполнялись. README/workflow/поставка согласованы.
+  [Подробная проверка кандидата и ограничения](reports/bsp-skills/7b1abc7-release-candidate-readiness.md).
+
 ## 2026-10-09 — reference recovery после P2 (не выпущено)
 
 - Reference root привязан к прочитанному installed `SKILL.md`; добавлен
