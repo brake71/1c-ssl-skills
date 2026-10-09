@@ -32,10 +32,18 @@ class FullNativeResponseScoringTests(unittest.TestCase):
     def test_error_word_without_wrong_module_name_does_not_satisfy_rejection(self):
         case = "update-safe-write-module-name"
         for replacement in ("ошибка при записи", "ошибочное имя метода",
-                            "ошибочное имя другого модуля", "правильное имя модуля"):
+                            "ошибочное имя другого модуля", "правильное имя модуля",
+                            "безошибочное имя модуля", "неошибочное имя модуля",
+                            "не ошибочное имя модуля", "не  ошибочное имя модуля"):
             with self.subTest(replacement=replacement):
                 response = self.responses[case].replace("ошибочное имя модуля", replacement)
                 self.assertFalse(self.score(case, response)["passed"])
+
+    def test_unrelated_module_rejection_does_not_satisfy_target_name_rejection(self):
+        case = "update-safe-write-module-name"
+        response = self.responses[case].replace("ошибочное имя модуля", "правильное имя модуля")
+        response += "\nДругой пример содержит ошибочное имя модуля."
+        self.assertFalse(self.score(case, response)["passed"])
 
     def test_new_module_wording_does_not_excuse_wrong_recommended_call(self):
         case = "update-safe-write-module-name"

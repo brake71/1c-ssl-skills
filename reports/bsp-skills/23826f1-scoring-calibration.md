@@ -49,3 +49,8 @@ Replay: `.tmp/scoring-23826f1-offline-replay.json`; исходные hashes со
 Свежие smoke и полные native RED/GREEN корпуса запускаются после commit;
 их результаты здесь пока не заявлены. Без quality retries/resume, без
 переписывания старых reports, без push/release или изменения vendor.
+
+Продолжение после commit a2ef091: [partial native check и дополнительный
+false-PASS control](a2ef091-native-check-and-wording-guard.md). Новая module-label
+ветвь дополнительно ограничена точным отвергаемым именем; original replay и
+behavioral reports выше не переписываются.
