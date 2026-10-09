@@ -76,3 +76,7 @@ quality FAIL сохраняется и сам по себе не отменяе�
 Ни prompt, ни skill не меняются между stages. После — independent re-scoring,
 credential scan и разбор всех FAIL. Пока новых behavioral результатов нет.
 Не повторяем тот же вариант ради PASS; без push/release/global изменений/vendor edits.
+
+Результаты frozen commit 2c2ba52: [полная native проверка discovery scope](2c2ba52-native-discovery-verification.md).
+Все четыре quality/isolation gates PASS; guided 79/81, activation 15/18,
+individual FAIL сохранены. Это новый behavioral evidence, отдельно от replay выше.
