@@ -3,7 +3,7 @@
   "references": {
     "admin-tools.md": [],
     "backup.md": [],
-    "base-common.md": ["neutral-message-near-field"],
+    "base-common.md": ["neutral-message-near-field", "neutral-rls-field-message"],
     "bp-tasks.md": [],
     "classifiers.md": [],
     "commands-external.md": [],
@@ -15,16 +15,16 @@
     "external-components.md": [],
     "files-and-versions.md": [],
     "forms-validation.md": [],
-    "fundamentals.md": [],
+    "fundamentals.md": ["neutral-public-api-boundary"],
     "longs-and-jobs.md": [],
     "multilang.md": [],
     "perf-monitoring.md": [],
     "prefixes.md": [],
-    "print-reports.md": [],
+    "print-reports.md": ["neutral-print-registration"],
     "protection-pd.md": [],
     "report-dedup.md": [],
     "update.md": ["neutral-upgrade-safe-write"],
-    "users-access.md": []
+    "users-access.md": ["neutral-rls-read-guard", "neutral-rls-field-message"]
   },
   "unscoped_cases": [
     "neutral-array-total",

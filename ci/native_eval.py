@@ -261,7 +261,9 @@ def run_native(cdx, case, workdir, artifact_dir, phase, run_number, model, effor
     (artifact_dir / f"{prefix}.response.md").write_text(response, encoding="utf-8")
     (artifact_dir / f"{prefix}.stderr.txt").write_text(error, encoding="utf-8")
     activation = evals.skill_activation_evidence(events, skill_name)
-    reference = evals.skill_activation_evidence(events, skill_name, case.reference) if case.should_trigger and case.reference else []
+    reference_reads, reference = evals.reference_read_evidence(
+        events, skill_name, case.required_references
+    )
     return {
         "returncode": returncode, "timed_out": timed_out,
         "tool_policy_blocked": any("blocked by policy" in event.get("item", {}).get("aggregated_output", "") for event in events),
@@ -269,7 +271,10 @@ def run_native(cdx, case, workdir, artifact_dir, phase, run_number, model, effor
         "elapsed_seconds": round(time.monotonic() - started, 3),
         "usage": evals.usage_from_events(events), "response": response,
         "skill_activated": bool(activation), "activation_evidence": activation,
-        "expected_reference_read": bool(reference), "reference_evidence": reference,
+        "expected_reference_read": bool(case.required_references) and all(reference_reads.values()),
+        "reference_evidence": reference,
+        "reference_reads": {name: bool(evidence) for name, evidence in reference_reads.items()},
+        "reference_evidence_by_file": reference_reads,
         "json_events": len(events), "stdout_noise": [], "stderr_tail": error[-4000:],
         "native_isolation_reasons": reasons,
         "native_inventory": {"profile": PROFILE,

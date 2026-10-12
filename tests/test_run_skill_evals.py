@@ -58,7 +58,8 @@ class EvalCorpusTests(unittest.TestCase):
             REPO_ROOT / "evals" / "activation-reference-matrix.json"
         )
         runner.validate_reference_matrix(cases, references, unscoped, SKILL_DIR / "references")
-        self.assertEqual(len(cases), 6)
+        self.assertEqual(len(cases), 10)
+        self.assertEqual(sum(bool(ids) for ids in references.values()), 5)
         self.assertEqual(sum(not c.should_trigger for c in cases), 3)
         self.assertEqual(len(unscoped), 4)
         self.assertIsNone(next(c.reference for c in cases if c.id == "other-version-api-boundary"))
@@ -1861,20 +1862,20 @@ class SummaryTests(unittest.TestCase):
 class ResumeReportTests(unittest.TestCase):
     def test_resume_report_rejects_old_activation_semantics(self):
         report = {"schema_version": 2}
-        with self.assertRaisesRegex(runner.EvalError, "schema_version=5"):
+        with self.assertRaisesRegex(runner.EvalError, f"schema_version={runner.REPORT_SCHEMA_VERSION}"):
             runner.validate_resume_report(report, {})
 
     def test_resume_report_rejects_pre_encoding_check_semantics(self):
-        with self.assertRaisesRegex(runner.EvalError, "schema_version=5"):
+        with self.assertRaisesRegex(runner.EvalError, f"schema_version={runner.REPORT_SCHEMA_VERSION}"):
             runner.validate_resume_report({"schema_version": 3}, {})
 
     def test_resume_report_rejects_pre_native_inventory_semantics(self):
-        with self.assertRaisesRegex(runner.EvalError, "schema_version=5"):
+        with self.assertRaisesRegex(runner.EvalError, f"schema_version={runner.REPORT_SCHEMA_VERSION}"):
             runner.validate_resume_report({"schema_version": 4}, {})
 
     def test_resume_report_rejects_incompatible_model(self):
         report = {
-            "schema_version": 5,
+            "schema_version": runner.REPORT_SCHEMA_VERSION,
             "model": "old-model",
             "selected_cases": ["case-a"],
             "runs": 1,
@@ -1890,7 +1891,7 @@ class ResumeReportTests(unittest.TestCase):
             runner.validate_resume_report(report, expected)
 
     def test_resume_report_rejects_changed_runner(self):
-        report = {"schema_version": 5, "runner_sha256": "old"}
+        report = {"schema_version": runner.REPORT_SCHEMA_VERSION, "runner_sha256": "old"}
         with self.assertRaisesRegex(runner.EvalError, "runner_sha256"):
             runner.validate_resume_report(report, {"runner_sha256": "new"})
         runner.validate_resume_report(report, {"runner_sha256": "old"})

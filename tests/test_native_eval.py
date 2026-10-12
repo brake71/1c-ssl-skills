@@ -256,7 +256,7 @@ class NativeTransportTests(unittest.TestCase):
             "score": {"passed": True, "invalid_methods": [], "unsafe_calls": [], "forbidden_hits": []},
         }
         report = {
-            "schema_version": 5, "launcher": "unused", "transport": "native",
+            "schema_version": runner.REPORT_SCHEMA_VERSION, "launcher": "unused", "transport": "native",
             "transport_profile": native.PROFILE,
             "native_helper_sha256": runner.file_sha256(Path(native.__file__)),
             "native_probe_sha256": runner.file_sha256(Path(native.probe.__file__)),

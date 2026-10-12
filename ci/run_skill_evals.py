@@ -47,7 +47,7 @@ DEFAULT_SKILL = REPO_ROOT / "skills" / "bsp"
 DEFAULT_WORKDIR = REPO_ROOT / "src"
 DEFAULT_BSL_SRC = REPO_ROOT / "src" / "cf"
 DEFAULT_MODEL = "gpt-5.6-luna"
-REPORT_SCHEMA_VERSION = 5
+REPORT_SCHEMA_VERSION = 6
 SKILL_CACHE_PATTERNS = ("__pycache__", "*.pyc", "*.pyo")
 WINDOWS_READING_INSTRUCTIONS = (
     "Text files are UTF-8. On Windows, read them using rg -n . -- PATH "
@@ -112,6 +112,13 @@ class EvalCase:
     required_code_block_patterns: tuple[str, ...] = ()
     forbidden_code_patterns: tuple[str, ...] = ()
     error_handling_rule: ErrorHandlingRule | None = None
+    secondary_references: tuple[str, ...] = ()
+
+    @property
+    def required_references(self) -> tuple[str, ...]:
+        if not self.should_trigger or self.reference is None:
+            return ()
+        return (self.reference, *self.secondary_references)
 
 
 @dataclass(frozen=True)
@@ -158,6 +165,24 @@ def load_cases(path: Path) -> list[EvalCase]:
         forbidden_code = _pattern_tuple(
             raw, "forbidden_code_patterns", case_id, required=False
         )
+        should_trigger = bool(raw.get("should_trigger", True))
+        primary = raw.get("reference")
+        if primary is not None and (
+            not isinstance(primary, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]+\.md", primary)
+        ):
+            raise EvalError(f"Case {case_id} has invalid reference")
+        secondary_raw = raw.get("secondary_references", [])
+        if (not isinstance(secondary_raw, list)
+                or not all(isinstance(item, str) for item in secondary_raw)):
+            raise EvalError(f"Case {case_id} has invalid secondary_references")
+        secondary = tuple(secondary_raw)
+        if secondary and (primary is None or not should_trigger):
+            raise EvalError(f"Case {case_id} cannot declare secondary_references without a positive primary reference")
+        if (len(secondary) != len(set(secondary))
+                or primary in secondary
+                or any(not re.fullmatch(r"[A-Za-z0-9_-]+\.md", item) for item in secondary)):
+            raise EvalError(f"Case {case_id} has invalid or duplicate secondary_references")
         rule_raw = raw.get("error_handling_rule")
         error_rule = None
         if rule_raw is not None:
@@ -187,8 +212,8 @@ def load_cases(path: Path) -> list[EvalCase]:
         result.append(EvalCase(
             id=case_id,
             task=task.strip(),
-            reference=raw.get("reference"),
-            should_trigger=bool(raw.get("should_trigger", True)),
+            reference=primary,
+            should_trigger=should_trigger,
             requires_bsl=bool(raw.get("requires_bsl", False)),
             required_patterns=required,
             forbidden_patterns=forbidden,
@@ -197,6 +222,7 @@ def load_cases(path: Path) -> list[EvalCase]:
             required_code_block_patterns=required_code_blocks,
             forbidden_code_patterns=forbidden_code,
             error_handling_rule=error_rule,
+            secondary_references=secondary,
         ))
     if not result:
         raise EvalError("Eval corpus is empty")
@@ -216,7 +242,7 @@ def load_reference_matrix(path: Path) -> tuple[dict[str, list[str]], list[str]]:
     if not isinstance(unscoped, list):
         raise EvalError("Reference matrix must contain an unscoped_cases array")
     for reference, case_ids in references.items():
-        if not isinstance(reference, str) or not reference.endswith(".md"):
+        if not isinstance(reference, str) or not re.fullmatch(r"[A-Za-z0-9_-]+\.md", reference):
             raise EvalError(f"Invalid reference matrix key: {reference!r}")
         if not isinstance(case_ids, list) or not all(
             isinstance(case_id, str) and case_id for case_id in case_ids
@@ -244,27 +270,36 @@ def validate_reference_matrix(
         raise EvalError(f"Reference matrix names unknown files: {', '.join(unknown)}")
 
     cases_by_id = {case.id: case for case in cases}
-    assignments: dict[str, str | None] = {}
+    assignments: dict[str, set[str]] = {}
     for reference, case_ids in references.items():
+        if len(case_ids) != len(set(case_ids)):
+            raise EvalError(f"Reference matrix contains duplicate case in {reference}")
         for case_id in case_ids:
-            if case_id in assignments:
-                raise EvalError(f"Eval case occurs more than once in reference matrix: {case_id}")
-            assignments[case_id] = reference
+            if case_id not in cases_by_id:
+                raise EvalError(f"Reference matrix names unknown eval case: {case_id}")
+            assignments.setdefault(case_id, set()).add(reference)
+    if len(unscoped_cases) != len(set(unscoped_cases)):
+        raise EvalError("Reference matrix contains duplicate unscoped case")
     for case_id in unscoped_cases:
+        if case_id not in cases_by_id:
+            raise EvalError(f"Reference matrix names unknown eval case: {case_id}")
         if case_id in assignments:
-            raise EvalError(f"Eval case occurs more than once in reference matrix: {case_id}")
-        assignments[case_id] = None
+            raise EvalError(f"Unscoped eval case also has references: {case_id}")
 
-    if missing := sorted(set(cases_by_id) - set(assignments)):
+    expected_scoped = {case.id for case in cases if case.reference is not None}
+    expected_unscoped = {case.id for case in cases if case.reference is None}
+    if missing := sorted((expected_scoped - set(assignments)) | (expected_unscoped - set(unscoped_cases))):
         raise EvalError(f"Reference matrix does not assign eval cases: {', '.join(missing)}")
-    if unknown := sorted(set(assignments) - set(cases_by_id)):
-        raise EvalError(f"Reference matrix names unknown eval cases: {', '.join(unknown)}")
-    for case_id, assigned_reference in assignments.items():
-        corpus_reference = cases_by_id[case_id].reference
-        if corpus_reference != assigned_reference:
+    if extra := sorted((set(assignments) - expected_scoped) | (set(unscoped_cases) - expected_unscoped)):
+        raise EvalError(f"Reference matrix has extra assignments: {', '.join(extra)}")
+    for case_id in expected_scoped:
+        case = cases_by_id[case_id]
+        expected = {case.reference, *case.secondary_references}
+        actual = assignments.get(case_id, set())
+        if actual != expected:
             raise EvalError(
-                f"Reference matrix assigns {case_id} to {assigned_reference!r}, "
-                f"but corpus declares {corpus_reference!r}"
+                f"Reference matrix assignments for {case_id} are {sorted(actual)!r}, "
+                f"expected {sorted(expected)!r}"
             )
     return {reference: list(case_ids) for reference, case_ids in references.items()}
 
@@ -760,6 +795,19 @@ def skill_activation_evidence(
                 evidence.append(command)
             break
     return evidence
+
+
+def reference_read_evidence(
+    events: Iterable[dict], skill_name: str, references: Iterable[str]
+) -> tuple[dict[str, list[str]], list[str]]:
+    """Collect strict per-reference evidence and a compatibility flat union."""
+    events = list(events)
+    by_file = {
+        reference: skill_activation_evidence(events, skill_name, reference)
+        for reference in references
+    }
+    union = list(dict.fromkeys(command for evidence in by_file.values() for command in evidence))
+    return by_file, union
 
 
 def tool_output_decode_errors(events: Iterable[dict]) -> list[dict]:
@@ -1562,10 +1610,8 @@ def run_cdx(
     events, noise = extract_jsonl(stdout)
     response = final_message(events)
     activation_evidence = skill_activation_evidence(events, skill_name)
-    reference_evidence = (
-        skill_activation_evidence(events, skill_name, case.reference)
-        if case.should_trigger and case.reference
-        else []
+    reference_reads, reference_evidence = reference_read_evidence(
+        events, skill_name, case.required_references
     )
     tool_policy_blocked = "blocked by policy" in stderr
     (artifact_dir / f"{prefix}.response.md").write_text(response, encoding="utf-8")
@@ -1579,8 +1625,10 @@ def run_cdx(
         "response": response,
         "skill_activated": bool(activation_evidence),
         "activation_evidence": activation_evidence,
-        "expected_reference_read": bool(reference_evidence),
+        "expected_reference_read": bool(case.required_references) and all(reference_reads.values()),
         "reference_evidence": reference_evidence,
+        "reference_reads": {reference: bool(evidence) for reference, evidence in reference_reads.items()},
+        "reference_evidence_by_file": reference_reads,
         "json_events": len(events),
         "stdout_noise": noise,
         "stderr_tail": stderr[-4000:],
@@ -1694,6 +1742,7 @@ def phase_case_records(
         records.append({
             "id": case.id,
             "reference": case.reference,
+            "secondary_references": list(case.secondary_references),
             "should_trigger": case.should_trigger,
             "complete": complete,
             "majority_passed": (
@@ -1704,7 +1753,7 @@ def phase_case_records(
             ),
             "majority_reference_read": (
                 majority(run.get("expected_reference_read", False) for run in case_runs)
-                if complete and case.should_trigger and case.reference else None
+                if complete and case.required_references else None
             ),
             "runs": case_runs,
         })
@@ -2069,7 +2118,7 @@ def main() -> None:
                             require_activation=phase == "green",
                             reference_read=execution["expected_reference_read"],
                             require_reference=(
-                                phase == "green" and case.should_trigger and bool(case.reference)
+                                phase == "green" and bool(case.required_references)
                             ),
                         )
                         execution["infrastructure_reason"] = infrastructure_reason(execution)
