@@ -113,6 +113,7 @@ class EvalCase:
     forbidden_code_patterns: tuple[str, ...] = ()
     error_handling_rule: ErrorHandlingRule | None = None
     secondary_references: tuple[str, ...] = ()
+    required_syntax_patterns: tuple[str, ...] = ()
 
     @property
     def required_references(self) -> tuple[str, ...]:
@@ -162,6 +163,9 @@ def load_cases(path: Path) -> list[EvalCase]:
         required_code_blocks = _pattern_tuple(
             raw, "required_code_block_patterns", case_id, required=False
         )
+        required_syntax = _pattern_tuple(
+            raw, "required_syntax_patterns", case_id, required=False
+        )
         forbidden_code = _pattern_tuple(
             raw, "forbidden_code_patterns", case_id, required=False
         )
@@ -200,7 +204,7 @@ def load_cases(path: Path) -> list[EvalCase]:
             error_rule = ErrorHandlingRule(rule_raw["value"], rule_raw["source_call"], tuple(rule_raw["normal_values"]))
         for pattern in (
             required + forbidden + activation + required_code + required_code_blocks
-            + forbidden_code
+            + required_syntax + forbidden_code
         ):
             try:
                 re.compile(pattern, re.I | re.S)
@@ -223,6 +227,7 @@ def load_cases(path: Path) -> list[EvalCase]:
             forbidden_code_patterns=forbidden_code,
             error_handling_rule=error_rule,
             secondary_references=secondary,
+            required_syntax_patterns=required_syntax,
         ))
     if not result:
         raise EvalError("Eval corpus is empty")
@@ -1347,6 +1352,11 @@ def score_response(
         executable_pattern_hit(pattern, bsl_text, bsl_syntax)
         for pattern in case.required_code_patterns
     ]
+    # Control-flow assertions inspect syntax only: strings cannot supply an effect.
+    required_syntax_hits = [
+        any(re.search(pattern, syntax, flags) for _values, syntax in code_views)
+        for pattern in case.required_syntax_patterns
+    ]
     # Each block-pattern must be demonstrated in a distinct executable fence.
     # Greedy matching is sufficient because eval patterns describe disjoint steps.
     unmatched_blocks = set(range(len(executable_blocks)))
@@ -1399,6 +1409,7 @@ def score_response(
         all(required_hits)
         and all(required_code_hits)
         and all(required_code_block_hits)
+        and all(required_syntax_hits)
         and error_rule_hit
     )
     activation_ok = skill_activated if case.should_trigger else not skill_activated
@@ -1433,22 +1444,29 @@ def score_response(
         "response_grounded": response_grounded,
         "expected_hits": (
             sum(required_hits) + sum(required_code_hits) + sum(required_code_block_hits)
-            + int(case.error_handling_rule is not None and error_rule_hit)
+            + sum(required_syntax_hits) + int(case.error_handling_rule is not None and error_rule_hit)
         ),
         "expected_total": (
             len(required_hits) + len(required_code_hits) + len(required_code_block_hits)
-            + int(case.error_handling_rule is not None)
+            + len(required_syntax_hits) + int(case.error_handling_rule is not None)
         ),
         "expected_score": (
             (sum(required_hits) + sum(required_code_hits) + sum(required_code_block_hits)
-             + int(case.error_handling_rule is not None and error_rule_hit))
+             + sum(required_syntax_hits) + int(case.error_handling_rule is not None and error_rule_hit))
             / (len(required_hits) + len(required_code_hits) + len(required_code_block_hits)
-               + int(case.error_handling_rule is not None))
+               + len(required_syntax_hits) + int(case.error_handling_rule is not None))
         ),
         "missing_patterns": [
             pattern for pattern, hit in zip(case.required_patterns, required_hits) if not hit
         ] + [
             pattern for pattern, hit in zip(case.required_code_patterns, required_code_hits)
+            if not hit
+        ] + [
+            pattern for pattern, hit in zip(case.required_syntax_patterns, required_syntax_hits)
+            if not hit
+        ],
+        "missing_syntax_patterns": [
+            pattern for pattern, hit in zip(case.required_syntax_patterns, required_syntax_hits)
             if not hit
         ],
         "missing_code_patterns": [

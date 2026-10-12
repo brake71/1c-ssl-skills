@@ -1,5 +1,6 @@
 """Paired controls for guidance-free navigation, RLS, printing and a two-topic task."""
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from ci import run_skill_evals as runner
@@ -137,6 +138,48 @@ class ActivationExpansionTests(unittest.TestCase):
         ):
             with self.subTest(before=before):
                 self.assertFalse(self.score(case, response.replace(before, after))["passed"])
+
+    def test_captured_incomplete_print_registration_stays_fail(self):
+        response = (ROOT / "tests/fixtures/responses/v016-incomplete-print-registration.md").read_text(encoding="utf-8")
+        score = self.score("neutral-print-registration", response)
+        self.assertFalse(score["passed"])
+        self.assertTrue(score["missing_code_patterns"])
+
+    def test_refusal_must_be_inside_the_rls_denial_branch(self):
+        case = "neutral-rls-field-message"
+        without_refusal = ANSWERS[case].replace("    Отказ = Истина;\n", "")
+        outside_after = without_refusal.replace("КонецЕсли;", "КонецЕсли;\nОтказ = Истина;")
+        outside_before = without_refusal.replace("```bsl\n", "```bsl\nОтказ = Истина;\n")
+        literal_refusal = outside_after.replace(
+            '"Чтение документа запрещено"', '"Отказ = Истина"'
+        )
+        for response in (outside_after, outside_before, literal_refusal):
+            with self.subTest(response=response):
+                self.assertFalse(self.score(case, response)["passed"])
+
+    def test_message_must_be_in_the_same_denial_branch_as_refusal(self):
+        response = ANSWERS["neutral-rls-field-message"].replace(
+            "    ОбщегоНазначения.СообщитьПользователю(",
+            "Иначе\n    ОбщегоНазначения.СообщитьПользователю("
+        )
+        self.assertFalse(self.score("neutral-rls-field-message", response)["passed"])
+
+    def test_syntax_patterns_mask_comments_and_literal_effects(self):
+        pattern = r"Отказ\s*=\s*Истина"
+        case = replace(
+            self.cases["neutral-rls-field-message"], required_patterns=("Готово",),
+            required_code_patterns=(), required_syntax_patterns=(pattern,),
+            forbidden_code_patterns=(),
+        )
+        for code in ('Сообщить("Отказ = Истина");', '// Отказ = Истина;\nСообщить("Готово");'):
+            with self.subTest(code=code):
+                score = runner.score_response(case, f"Готово\n```bsl\n{code}\n```", {})
+                self.assertFalse(score["quality_passed"])
+                self.assertEqual(score["missing_syntax_patterns"], [pattern])
+        score = runner.score_response(case, 'Готово\n```bsl\nОтказ = Истина;\n```', {})
+        self.assertTrue(score["quality_passed"])
+        self.assertEqual(score["expected_hits"], score["expected_total"])
+        self.assertEqual(score["expected_score"], 1.0)
 
     def test_field_message_accepts_key_object_and_refusal_argument(self):
         case = "neutral-rls-field-message"

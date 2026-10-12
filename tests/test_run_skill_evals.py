@@ -129,6 +129,7 @@ class EvalCorpusTests(unittest.TestCase):
             "cases": [{
                 **self._raw_case("code-patterns"),
                 "required_code_patterns": [r"Вызов\(\)"],
+                "required_syntax_patterns": [r"Отказ\s*=\s*Истина"],
                 "required_code_block_patterns": [r"Процедура А", r"Процедура Б"],
                 "forbidden_code_patterns": [r"Запрещённый\("],
             }],
@@ -138,12 +139,18 @@ class EvalCorpusTests(unittest.TestCase):
             path.write_text(json.dumps(payload), encoding="utf-8")
             case = runner.load_cases(path)[0]
             self.assertEqual(case.required_code_patterns, (r"Вызов\(\)",))
+            self.assertEqual(case.required_syntax_patterns, (r"Отказ\s*=\s*Истина",))
             self.assertEqual(
                 case.required_code_block_patterns, (r"Процедура А", r"Процедура Б")
             )
             self.assertEqual(case.forbidden_code_patterns, (r"Запрещённый\(",))
 
             payload["cases"][0]["required_code_patterns"] = ["["]
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(runner.EvalError, "Invalid regex"):
+                runner.load_cases(path)
+            payload["cases"][0]["required_code_patterns"] = []
+            payload["cases"][0]["required_syntax_patterns"] = ["["]
             path.write_text(json.dumps(payload), encoding="utf-8")
             with self.assertRaisesRegex(runner.EvalError, "Invalid regex"):
                 runner.load_cases(path)
