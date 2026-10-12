@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.16 — локальный кандидат, не опубликован
+
+- Activation-корпус расширен с 6 до 10 сценариев, coverage с 2/24 до
+  **5/24 references**. `secondary_references` и schema 6 требуют успешного
+  чтения каждого файла сквозной задачи, не listing или aggregate reader exit 1.
+- Исправлены пример хука возможных прав и завершение регистрации команды
+  печати. Уточнены RLS-отказ без исключения и ключ сообщения у поля текущей
+  формы; ложные branch/key/wording результаты защищены paired regressions.
+  Regex/BSL criteria остаются ограниченными; пороги не снижены.
+- Frozen `5f9aefe`: **217 tests PASS**, API **664/664**, semantic **0/0**.
+  ZIP/tar.gz собраны дважды одинаково; 29 файлов, оба упакованных установщика:
+  12 installs, 12 updates, 24 safe refusals без сети и глобальных путей.
+- Новые native результаты реально извлечённого ZIP: smoke/RLS **1/1**,
+  guided **27/27 majority, 81/81 individual**, activation **10/10, 28/30**;
+  все итоговые quality/isolation gates PASS. Guided activation/read **78/78**,
+  activation positive/allrefs-read **21/21 и 18/18**, false activation
+  **0/3 и 0/9**. Это отдельные корпуса, не 100% behavioral coverage.
+- Один provider-capacity failure восстановлен в отдельной копии при
+  неизменных fingerprints/manifests. Все 59 завершённых outcomes и два
+  quality FAIL сохранены; original infrastructure FAIL не переписан.
+  Parent перепроверил 226 final outcomes; known-credential scans:
+  916 native и 510 packaging файлов, 0 совпадений.
+- Tag/push/release не выполнялись. Исторические FAIL и ограничения сохранены;
+  docs-only финал не меняет проверенные payload/runner/corpus bytes.
+  [Готовность локального кандидата и оставшийся долг](reports/bsp-skills/v0.16-release-candidate-readiness.md).
+
 ## v0.15 — native isolation, discovery и проверка поставки
 
 - Scope определяется до открытия skill: explicit BSP API review имеет

@@ -1,12 +1,15 @@
 # Планы по скилу БСП
 
-**Действующий план развития:** [после v0.15](bsp-development-after-v0.13.md).
-Ближайшая итерация — расширение самостоятельной активации с 2/24 references;
-открытые ограничения и критерии завершения перечислены в плане.
+**Действующий план развития:** [после локального кандидата v0.16](bsp-development-after-v0.13.md).
+Первая activation-партия выполнена: **5/24 references**, 10 сценариев;
+guided 81/81, activation 28/30 individual, все итоговые gates PASS.
+Ближайшая итерация — встроенный fixture/resume контроль P0, затем следующая
+риск-ориентированная P1-партия. Два activation quality FAIL сохранены.
 
-Основание текущего состояния: [проверка кандидата v0.15](../reports/bsp-skills/7b1abc7-release-candidate-readiness.md).
-Тег v0.15 существует локально; этот отчёт фиксирует проверки до создания тега,
-а не подтверждение публикации GitHub Release или скачанных release assets.
+Основание текущего состояния: [локальная проверка v0.16](../reports/bsp-skills/v0.16-release-candidate-readiness.md).
+Тег/push/публикация v0.16 не выполнялись. [Кандидат v0.15](../reports/bsp-skills/7b1abc7-release-candidate-readiness.md)
+остаётся историческим evidence; эти локальные отчёты не доказывают
+публикацию GitHub Release или скачанных release assets.
 [Проверка опубликованного v0.14](../reports/bsp-skills/v0.14-published-verification.md)
 остаётся историческим evidence, не проверкой v0.15.
 

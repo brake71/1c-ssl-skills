@@ -109,7 +109,8 @@ cp -r 1c-ssl-skills/skills/bsp ~/.claude/skills/
   конфигурации БСП.
 
 Reference-файлы не являются отдельными скилами. Агент сначала загружает
-`bsp/SKILL.md`, затем выбирает один подходящий reference. Скил рассчитан на
+`bsp/SKILL.md`, затем выбирает основной reference, а для сквозной задачи читает и нужные
+связанные разделы. Скил рассчитан на
 БСП 3.1.11; для другой версии сигнатуры и стабильность API нужно перепроверять
 по исходникам соответствующей поставки.
 
@@ -346,7 +347,8 @@ bootstrap сериализован до пула: без этого паралл
 прогоны: guided **27/27 majority, 80/81 individual**, activation **5/6,
 16/18**; оба gate PASS в обоих корпусах. False activation отрицательных задач
 0/9; три настоящих quality failures сохранены, не объявлены исправленными.
-Исторические отчёты не пересчитаны задним числом. Эти изменения не выпущены.
+Исторические отчёты не пересчитаны задним числом. На том этапе эти изменения
+ещё не были выпущены.
 [Разбор и проверки P2](reports/bsp-skills/p2-scoring-and-native-activation-after-v0.14.md).
 
 После исправления root/reference recovery на `5a4a338`: свежий guided
@@ -365,6 +367,18 @@ activation positive/read **9/9 и 6/6**, false activation **0/9**. Три guided
 individual FAIL сохранены; это не исправление исторических платформенных
 ошибок и не полное activation coverage (2/24 references).
 [Проверка поставки, raw FAIL и ограничения](reports/bsp-skills/7b1abc7-release-candidate-readiness.md).
+
+Локальный кандидат **v0.16** на frozen `5f9aefe`: **217 tests PASS**, API
+**664/664**, semantic **0/0**; две идентичные сборки и оба упакованных
+установщика PASS. На реально извлечённом ZIP: smoke/RLS **1/1** каждый,
+guided **27/27 majority, 81/81 individual**, activation **10/10, 28/30**;
+все итоговые quality/isolation gates PASS. Guided activation/read **78/78**,
+activation positive/allrefs-read **21/21 и 18/18**, false activation **0/3
+и 0/9**. Coverage самостоятельной активации расширен до **5/24**.
+Одна provider-capacity попытка восстановлена в отдельной копии; 59 завершённых
+outcomes, включая два quality FAIL, и исходный infrastructure FAIL сохранены.
+Это не Git-тег и не публикация; команды установки по ref остаются на v0.15.
+[Поставка, фактические результаты и ограничения v0.16](reports/bsp-skills/v0.16-release-candidate-readiness.md).
 
 ### Native preflight изоляции (без вызова модели)
 
