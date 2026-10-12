@@ -157,6 +157,33 @@ class ActivationExpansionTests(unittest.TestCase):
             with self.subTest(response=response):
                 self.assertFalse(self.score(case, response)["passed"])
 
+    def test_denied_read_description_is_not_a_prohibition_of_the_public_call(self):
+        case = "neutral-rls-field-message"
+        code = ANSWERS[case].replace("Серверный обработчик:\n", "")
+        response = (
+            "УправлениеДоступом.ЧтениеРазрешено() возвращает Ложь, "
+            "если чтение запрещено. Для сообщения используйте "
+            "ОбщегоНазначения.СообщитьПользователю():\n\n" + code
+        )
+        self.assertTrue(self.score(case, response)["passed"])
+        for warning in (
+            "УправлениеДоступом.ЧтениеРазрешено() вызывать запрещено. ",
+            "УправлениеДоступом.ЧтениеРазрешено() возвращает Ложь, "
+            "если чтение запрещено; этот вызов использовать нельзя. ",
+        ):
+            with self.subTest(warning=warning):
+                self.assertFalse(self.score(case, warning + "\n\n" + code)["passed"])
+
+    def test_checked_reference_is_not_the_key_of_the_form_field_message(self):
+        case = "neutral-rls-field-message"
+        response = (ROOT / "tests/fixtures/responses/v016-rls-wrong-message-key.md").read_text(encoding="utf-8")
+        score = self.score(case, response)
+        self.assertFalse(score["passed"])
+        self.assertIn("УправлениеДоступом.ЧтениеРазрешено", score["known_module_calls"])
+        self.assertIn("ОбщегоНазначения.СообщитьПользователю", score["known_module_calls"])
+        correct_binding = response.replace("        Объект.ДокументОснование,\n", "        ,\n")
+        self.assertTrue(self.score(case, correct_binding)["passed"])
+
     def test_dead_nested_branch_cannot_supply_denial_effects(self):
         case = "neutral-rls-field-message"
         response = ANSWERS[case].replace(

@@ -906,7 +906,14 @@ def warning_targets_same_call(context: str, code_syntax: str) -> bool:
         for call in CALL_RE.finditer(code_syntax)
     }
     for clause in re.split(r"(?<=[.!?;:])\s+", context):
-        if not NEGATIVE_BLOCK_RE.search(clause):
+        # A Boolean result describes denied data access, not a forbidden API.
+        # Remove only this explicit return-value predicate; independent warnings
+        # in the same clause must still target the executable call.
+        warning_clause = re.sub(
+            r"\bвозвращает\s+`?Ложь`?\s*,?\s*если\s+"
+            r"(?:чтение(?:\s+ссылки)?|доступ)\s+запрещ[её]н\w*\b", "", clause, flags=re.I,
+        )
+        if not NEGATIVE_BLOCK_RE.search(warning_clause):
             continue
         references = {
             (reference.group("module").lower(), reference.group("method").lower())
