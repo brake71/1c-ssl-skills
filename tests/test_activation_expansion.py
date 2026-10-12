@@ -157,6 +157,40 @@ class ActivationExpansionTests(unittest.TestCase):
             with self.subTest(response=response):
                 self.assertFalse(self.score(case, response)["passed"])
 
+    def test_dead_nested_branch_cannot_supply_denial_effects(self):
+        case = "neutral-rls-field-message"
+        response = ANSWERS[case].replace(
+            "    Отказ = Истина;", "    Если Ложь Тогда\n        Отказ = Истина;"
+        ).replace("КонецЕсли;", "    КонецЕсли;\nКонецЕсли;")
+        self.assertFalse(self.score(case, response)["passed"])
+
+    def test_one_if_scope_rejects_extra_conditions(self):
+        case = "neutral-rls-field-message"
+        response = ANSWERS[case]
+        outer_condition = response.replace(
+            "```bsl\n", "```bsl\nЕсли Ложь Тогда\n"
+        ).replace("КонецЕсли;", "КонецЕсли;\nКонецЕсли;")
+        nested_condition = response.replace(
+            "    Отказ = Истина;", "    Если Истина Тогда\n        Отказ = Истина;"
+        ).replace("КонецЕсли;", "    КонецЕсли;\nКонецЕсли;")
+        else_if_condition = response.replace(
+            "Если Не УправлениеДоступом", "Если УправлениеДоступом"
+        ).replace(" Тогда\n", " Тогда\nИначеЕсли Ложь Тогда\n")
+        for code in (outer_condition, nested_condition, else_if_condition):
+            with self.subTest(code=code):
+                self.assertFalse(self.score(case, code)["passed"])
+
+    def test_one_if_scope_ignores_keyword_literals_and_accepts_procedure_wrapper(self):
+        case = "neutral-rls-field-message"
+        response = ANSWERS[case].replace(
+            "```bsl\n", "```bsl\nПроцедура ПроверкаЗаписи(Отказ)\n"
+        ).replace(
+            "    Отказ = Истина;", "    // Если ИначеЕсли Если\n    Отказ = Истина;"
+        ).replace(
+            '"Чтение документа запрещено"', '"Чтение запрещено: Если ИначеЕсли Если"'
+        ).replace("КонецЕсли;", "КонецЕсли;\nКонецПроцедуры")
+        self.assertTrue(self.score(case, response)["passed"])
+
     def test_message_must_be_in_the_same_denial_branch_as_refusal(self):
         response = ANSWERS["neutral-rls-field-message"].replace(
             "    ОбщегоНазначения.СообщитьПользователю(",
