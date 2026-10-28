@@ -75,6 +75,44 @@ class P2ResponseScoringTests(unittest.TestCase):
         transplanted = refusal + "\n```bsl\nОбщегоНазначения.СообщитьПользователю(Текст);\n```"
         self.assertFalse(runner.score_response(case, transplanted, {})["quality_passed"])
 
+    def test_captured_version_boundary_refusal_not_equated_with_confirmation(self):
+        case = next(c for c in runner.load_cases(ROOT / "evals/activation-cases.json")
+                    if c.id == "other-version-api-boundary")
+        response = (ROOT / "tests/fixtures/responses/p1-version-boundary.md").read_text(encoding="utf-8")
+        self.assertTrue(runner.score_response(case, response, {})["quality_passed"])
+        for wrong in (
+            response.replace("нельзя считать подтверждением", "можно считать подтверждением"),
+            response.replace("нельзя считать подтверждением", "нельзя считать опровержением"),
+            response.replace("для 3.2.1", "для 3.1.11"),
+        ):
+            with self.subTest(wrong=wrong[:120]):
+                self.assertFalse(runner.score_response(case, wrong, {})["quality_passed"])
+
+    def test_captured_contact_public_call_survives_unrelated_data_warning(self):
+        case = self.cases["contact-info-representation-public-boundary"]
+        response = (ROOT / "tests/fixtures/responses/p1-contact-info-public.md").read_text(encoding="utf-8")
+        methods = {"УправлениеКонтактнойИнформацией": {
+            "ПредставлениеКонтактнойИнформацииОбъекта":
+                runner.MethodInfo("ПрограммныйИнтерфейс", "")}}
+        def score(text):
+            return runner.score_response(case, text, methods, skill_activated=True,
+                                         require_activation=True, reference_read=True,
+                                         require_reference=True)
+        self.assertTrue(score(response)["passed"])
+        for wrong in (
+            response.replace("Промежуточно получать внутренние данные не нужно: этот метод возвращает готовую строку для печати.",
+                             "Этот метод вызывать не нужно: используйте другой способ."),
+            response.replace("Промежуточно получать внутренние данные не нужно: этот метод возвращает готовую строку для печати.",
+                             "УправлениеКонтактнойИнформацией.ПредставлениеКонтактнойИнформацииОбъекта использовать не следует."),
+            response.replace("Промежуточно получать внутренние данные не нужно: этот метод возвращает готовую строку для печати.",
+                             "Этот метод вызывать не следует; промежуточно получать внутренние данные не нужно."),
+            response.replace('"ТолькоПервая", Истина', '"ТолькоПервая", Ложь'),
+            response.replace("УправлениеКонтактнойИнформацией.ПредставлениеКонтактнойИнформацииОбъекта(",
+                             "УправлениеКонтактнойИнформациейСлужебный.ПредставлениеКонтактнойИнформации(")
+        ):
+            with self.subTest(wrong=wrong[-180:]):
+                self.assertFalse(score(wrong)["passed"])
+
     def test_text_assertions_still_require_rejection_and_hook_boundary(self):
         progress = self.responses["nonexistent-service-module"].replace(
             "Совет почти верный по смыслу, но имя модуля указано неправильно.", "Совет правильный.")

@@ -34,6 +34,24 @@ ANSWERS = {
     Команда.Представление = "Счет";
 КонецПроцедуры
 ```''',
+    "neutral-background-progress": '''В теле выполняемой серверной функции сообщаем о ходе работы, результат возвращаем отдельно:
+```bsl
+Функция РассчитатьДанные(Параметры) Экспорт
+    Результат = 0;
+    ДлительныеОперации.СообщитьПрогресс(50, "Половина обработки");
+    Возврат Результат;
+КонецФункции
+```
+В форме включаем прогресс в стандартном ожидании:
+```bsl
+&НаКлиенте
+Процедура ПоказатьХодРаботы(Команда)
+    ДлительнаяОперация = НачатьРасчетНаСервере();
+    ПараметрыОжидания = ДлительныеОперацииКлиент.ПараметрыОжидания(ЭтотОбъект);
+    ПараметрыОжидания.ВыводитьПрогрессВыполнения = Истина;
+    ДлительныеОперацииКлиент.ОжидатьЗавершение(ДлительнаяОперация, Неопределено, ПараметрыОжидания);
+КонецПроцедуры
+```''',
     "neutral-rls-field-message": '''Серверный обработчик:
 ```bsl
 Если Не УправлениеДоступом.ЧтениеРазрешено(Объект.ДокументОснование) Тогда
@@ -55,6 +73,13 @@ class ActivationExpansionTests(unittest.TestCase):
             },
             "ОбщегоНазначения": {
                 "СообщитьПользователю": runner.MethodInfo("ПрограммныйИнтерфейс", "")
+            },
+            "ДлительныеОперации": {
+                "СообщитьПрогресс": runner.MethodInfo("ПрограммныйИнтерфейс", "")
+            },
+            "ДлительныеОперацииКлиент": {
+                name: runner.MethodInfo("ПрограммныйИнтерфейс", "")
+                for name in ("ПараметрыОжидания", "ОжидатьЗавершение")
             },
             "УправлениеПечатьюПереопределяемый": {
                 "ПриОпределенииНастроекПечати": runner.MethodInfo("ПрограммныйИнтерфейс", "")
@@ -125,6 +150,38 @@ class ActivationExpansionTests(unittest.TestCase):
             "Команда = КомандыПечати.Добавить();"
         ))["passed"])
 
+    def test_background_progress_requires_server_and_client_steps_in_separate_fences(self):
+        response = ANSWERS["neutral-background-progress"]
+        for wrong in (
+            response.replace("ВыводитьПрогрессВыполнения = Истина", "ВыводитьПрогрессВыполнения = Ложь"),
+            response.replace("ДлительныеОперации.СообщитьПрогресс", "ДлительныеОперацииКлиент.СообщитьПрогресс"),
+            response.replace("&НаКлиенте", "&НаСервере"),
+            response.replace("ДлительныеОперацииКлиент.ОжидатьЗавершение", "ДлительныеОперацииКлиент.ПрочитатьПрогресс"),
+            response + "\n```bsl\nФоновыеЗадания.Выполнить(\"Расчёт\");\n```",
+            response.replace("ДлительныеОперацииКлиент.ПараметрыОжидания", "ДлительныеОперации.ПараметрыОжидания"),
+            response.replace("```\nВ форме", "\nВ форме").replace("```bsl\n&НаКлиенте", "&НаКлиенте"),
+        ):
+            with self.subTest(wrong=wrong[-170:]):
+                self.assertFalse(self.score("neutral-background-progress", wrong)["passed"])
+
+    def test_progress_accepts_labeled_server_fragment_but_not_client_progress(self):
+        response = (ROOT / "tests/fixtures/responses/p4-progress-server-fragment.md").read_text(encoding="utf-8")
+        self.assertTrue(self.score("neutral-background-progress", response)["passed"])
+        self.assertTrue(self.score("neutral-background-progress", response.replace(
+            "**Внутри выполняемой серверной функции:**",
+            "**Внутри выполняемой в фоне серверной функции:**",
+        ))["passed"])
+        for wrong in (
+            response.replace("**Внутри выполняемой серверной функции:**", "**В клиентском обработчике формы:**"),
+            response.replace("**Внутри выполняемой серверной функции:**", ""),
+            response.replace("```bsl\nДлительныеОперации.СообщитьПрогресс", "```bsl\n&НаКлиенте\nДлительныеОперации.СообщитьПрогресс", 1),
+            response.replace("ДлительныеОперации.СообщитьПрогресс(25", "ДлительныеОперацииКлиент.СообщитьПрогресс(25"),
+            response.replace("ВыводитьПрогрессВыполнения = Истина", "ВыводитьПрогрессВыполнения = Ложь"),
+            response.replace("```bsl\n&НаКлиенте", "```bsl\n&НаСервере"),
+        ):
+            with self.subTest(wrong=wrong[:120]):
+                self.assertFalse(self.score("neutral-background-progress", wrong)["passed"])
+
     def test_two_topic_refusal_requires_rls_field_binding_and_refusal_effect(self):
         case = "neutral-rls-field-message"
         response = ANSWERS[case]
@@ -138,6 +195,48 @@ class ActivationExpansionTests(unittest.TestCase):
         ):
             with self.subTest(before=before):
                 self.assertFalse(self.score(case, response.replace(before, after))["passed"])
+
+    def test_platform_exchange_failure_is_not_a_false_activation_issue(self):
+        case = self.cases["neutral-platform-exchange-registration"]
+        wrong = (
+            "```bsl\nРегистрацияИзменений.ЗарегистрироватьИзменения("
+            "УзелПланаОбмена, СсылкаНаДокумент);\n```\n"
+            "Вызов выполняйте на сервере: платформа зарегистрирует изменение."
+        )
+        correct = (
+            "```bsl\nПланыОбмена[ИмяПлана].ЗарегистрироватьИзменения("
+            "УзелПланаОбмена, СсылкаНаДокумент);\n```"
+        )
+        self.assertFalse(runner.score_response(case, wrong, self.methods)["passed"])
+        for observed_wrong in (
+            "ОбменДанными.ЗарегистрироватьИзменения(УзелПланаОбмена, СсылкаНаДокумент);",
+            "ПланыОбмена.ИмяВашегоПлана.ЗаписатьИзменения(УзелПланаОбмена, СсылкаНаДокумент);",
+        ):
+            with self.subTest(observed_wrong=observed_wrong):
+                score = runner.score_response(case, f"```bsl\n{observed_wrong}\n```", self.methods)
+                self.assertFalse(score["passed"])
+                self.assertTrue(score["forbidden_hits"] or score["missing_patterns"])
+        self.assertTrue(runner.score_response(case, correct, self.methods)["passed"])
+        self.assertFalse(runner.score_response(
+            case, correct, self.methods, skill_activated=True, require_activation=True,
+        )["passed"])
+
+    def test_captured_print_caller_wording_and_false_caller_controls(self):
+        response = (ROOT / "tests/fixtures/responses/v016-print-caller-wording.md").read_text(encoding="utf-8")
+        self.assertTrue(self.score("neutral-print-registration", response)["passed"])
+        for wrong in (
+            response.replace(
+                "БСП учитывает объекты из `Настройки.ОбъектыПечати`, вызывает менеджерскую",
+                "БСП учитывает объекты из `Настройки.ОбъектыПечати`, а форма вызывает менеджерскую",
+            ).replace("Команды регистрируются при вызове **БСП**", "Команды регистрируются из формы"),
+            response.replace(
+                "БСП учитывает объекты из `Настройки.ОбъектыПечати`, вызывает менеджерскую",
+                "БСП не учитывает объекты из `Настройки.ОбъектыПечати`; форму вызывает менеджерская",
+            ).replace("Команды регистрируются при вызове **БСП**", "Команды регистрируются из формы"),
+            response.replace("Настройки.ПриДобавленииКомандПечати = Истина", "Настройки.ПриДобавленииКомандПечати = Ложь"),
+        ):
+            with self.subTest(wrong=wrong[:100]):
+                self.assertFalse(self.score("neutral-print-registration", wrong)["passed"])
 
     def test_captured_incomplete_print_registration_stays_fail(self):
         response = (ROOT / "tests/fixtures/responses/v016-incomplete-print-registration.md").read_text(encoding="utf-8")

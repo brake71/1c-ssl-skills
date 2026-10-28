@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import shlex
+import stat
 import subprocess
 import sys
 import time
@@ -47,7 +48,7 @@ DEFAULT_SKILL = REPO_ROOT / "skills" / "bsp"
 DEFAULT_WORKDIR = REPO_ROOT / "src"
 DEFAULT_BSL_SRC = REPO_ROOT / "src" / "cf"
 DEFAULT_MODEL = "gpt-5.6-luna"
-REPORT_SCHEMA_VERSION = 6
+REPORT_SCHEMA_VERSION = 7
 SKILL_CACHE_PATTERNS = ("__pycache__", "*.pyc", "*.pyo")
 WINDOWS_READING_INSTRUCTIONS = (
     "Text files are UTF-8. On Windows, read them using rg -n . -- PATH "
@@ -960,6 +961,12 @@ def negative_example_context(context: str, code_syntax: str) -> bool:
         r"\bв\s+этот\s+(?:метод|вызов)\s+передава\w*\s+"
         r"не\s+(?:нужно|следует|надо|требуется)\b", "", context, flags=re.I,
     )
+    # Declining an intermediate data lookup is not a prohibition on the
+    # recommended API, even if the next clause says "this method returns ...".
+    argument_scoped = re.sub(
+        r"\b(?:промежуточно\s+)?получать\s+внутренн\w*\s+данн\w*\s+"
+        r"не\s+(?:нужно|следует)\b", "", argument_scoped, flags=re.I,
+    )
     if not NEGATIVE_BLOCK_RE.search(argument_scoped):
         return False
     deictic = re.search(r"\bэтот\s+(?:метод|вызов|код|пример)\b", argument_scoped, re.I)
@@ -1335,6 +1342,33 @@ def error_handling_rule_satisfied(blocks: list[str], rule: ErrorHandlingRule) ->
     return False
 
 
+def labeled_server_progress_fragment(response: str, executable_blocks: list[str]) -> bool:
+    """Accept a server-function *fragment* only when its adjacent label binds it.
+
+    The progress task asks for a fragment inside an already running function;
+    prose elsewhere and client-only fences cannot supply that context.
+    """
+    previous_end = 0
+    for match in BSL_FENCE_RE.finditer(response):
+        prefix = response[previous_end:match.start()]
+        previous_end = match.end()
+        label = re.split(r"\n\s*\n", prefix.rstrip())[-1]
+        if not re.search(
+            r"^\s*\*{0,2}(?:внутри|в теле)\s+(?:выполняемой\s+)?"
+            r"(?:в\s+фоне\s+)?серверной\s+функции\s*:\*{0,2}\s*$", label, re.I,
+        ):
+            continue
+        code = match.group("code")
+        if code not in executable_blocks:
+            continue
+        syntax = bsl_code_views(code)[1]
+        if re.search(r"&НаКлиенте\b|ДлительныеОперацииКлиент\.", syntax, re.I):
+            continue
+        if re.search(r"\bДлительныеОперации\.СообщитьПрогресс\s*\(", syntax, re.I):
+            return True
+    return False
+
+
 def score_response(
     case: EvalCase,
     response: str,
@@ -1368,7 +1402,7 @@ def score_response(
     # Greedy matching is sufficient because eval patterns describe disjoint steps.
     unmatched_blocks = set(range(len(executable_blocks)))
     required_code_block_hits = []
-    for pattern in case.required_code_block_patterns:
+    for pattern_index, pattern in enumerate(case.required_code_block_patterns):
         matching_block = next(
             (
                 index for index in sorted(unmatched_blocks)
@@ -1376,6 +1410,18 @@ def score_response(
             ),
             None,
         )
+        if (matching_block is None and case.id == "neutral-background-progress"
+                and pattern_index == 0
+                and labeled_server_progress_fragment(response, executable_blocks)):
+            # The second pattern still requires a distinct client fence.
+            matching_block = next(
+                (index for index in sorted(unmatched_blocks)
+                 if re.search(r"\bДлительныеОперации\.СообщитьПрогресс\s*\(",
+                              code_views[index][1], re.I)
+                 and not re.search(r"&НаКлиенте\b|ДлительныеОперацииКлиент\.",
+                                   code_views[index][1], re.I)),
+                None,
+            )
         required_code_block_hits.append(matching_block is not None)
         if matching_block is not None:
             unmatched_blocks.remove(matching_block)
@@ -1847,6 +1893,40 @@ def atomic_write_json(path: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
+def ordinary_fixture_manifest(workdir: Path, stage_target: Path) -> dict[str, str]:
+    """Hash ordinary consumer files, excluding Git metadata and exactly staged BSP.
+
+    Do not follow links: a linked ordinary path can escape the consumer root or
+    hide a mutation. Directory structure without files is not part of the fixture.
+    """
+    manifest: dict[str, str] = {}
+    stage_parts = stage_target.relative_to(workdir).parts
+
+    def visit(directory: Path, parts: tuple[str, ...]) -> None:
+        try:
+            children = sorted(directory.iterdir(), key=lambda path: path.name)
+            for child in children:
+                relative = (*parts, child.name)
+                if relative == (".git",) or relative == stage_parts:
+                    continue
+                if child.is_symlink() or (os.name == "nt" and bool(
+                    getattr(child.lstat(), "st_file_attributes", 0)
+                    & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                )):
+                    raise EvalError(f"Linked ordinary consumer path: {PurePosixPath(*relative)}")
+                if child.is_dir():
+                    visit(child, relative)
+                elif child.is_file():
+                    manifest[PurePosixPath(*relative).as_posix()] = file_sha256(child)
+                else:
+                    raise EvalError(f"Unsupported ordinary consumer path: {PurePosixPath(*relative)}")
+        except OSError as exc:
+            raise EvalError(f"Cannot inventory ordinary consumer fixture: {exc}") from exc
+
+    visit(workdir, ())
+    return manifest
+
+
 def validate_resume_report(report: dict, expected: dict) -> None:
     """Reject resume requests that could mix incomparable evaluation results."""
     if report.get("schema_version") != REPORT_SCHEMA_VERSION:
@@ -2022,8 +2102,8 @@ def main() -> None:
             if args.phase != "both":
                 raise EvalError("Native isolation requires --phase both")
             native.probe.validate_workdir(workdir, report_path)
-            if any(native.probe.is_linked(path) for path in (stage_target, stage_target.parent, stage_target.parent.parent)):
-                raise EvalError("Refusing native staging through linked paths")
+            if stage_target.exists() or any(native.probe.is_linked(path) for path in (stage_target, stage_target.parent, stage_target.parent.parent)):
+                raise EvalError("Refusing existing or linked native staging paths")
             if not args.dry_run:
                 auth_path = Path(args.auth_file).resolve() if args.auth_file else Path(
                     os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))
@@ -2033,6 +2113,10 @@ def main() -> None:
                 native_auth = native.load_auth(auth_path)
         elif args.auth_file:
             raise EvalError("--auth-file is only supported with --transport native")
+        fixture_baseline = (
+            ordinary_fixture_manifest(workdir, stage_target)
+            if native and not args.dry_run else None
+        )
         report_settings = {
             "launcher": cdx,
             "transport": args.transport,
@@ -2078,6 +2162,9 @@ def main() -> None:
             except (OSError, json.JSONDecodeError) as exc:
                 raise EvalError(f"Cannot read resume report {report_path}: {exc}") from exc
             validate_resume_report(report, report_settings)
+            if native and (not isinstance(report.get("ordinary_fixture_baseline"), dict)
+                           or report["ordinary_fixture_baseline"] != fixture_baseline):
+                raise EvalError("Cannot resume: ordinary consumer fixture differs or baseline is missing")
             artifact_dir.mkdir(parents=True, exist_ok=True)
             report["complete"] = False
             report["resumed_at"] = datetime.now(timezone.utc).isoformat()
@@ -2090,6 +2177,7 @@ def main() -> None:
                 **report_settings,
                 "jobs": args.jobs,
                 "complete": False,
+                **({"ordinary_fixture_baseline": fixture_baseline} if native else {}),
                 "phases": {},
                 "report_path": str(report_path),
             }
@@ -2099,7 +2187,24 @@ def main() -> None:
         report.pop("isolation_gate", None)
         report.pop("native_restored_red", None)
         report.pop("native_warmup_red", None)
+        report.pop("ordinary_fixture_gate", None)
         atomic_write_json(report_path, report)
+
+        def check_fixture(label: str) -> bool:
+            if not native:
+                return True
+            current = ordinary_fixture_manifest(workdir, stage_target)
+            report.setdefault("ordinary_fixture_checks", {})[label] = current
+            passed = current == fixture_baseline
+            if not passed:
+                report["ordinary_fixture_gate"] = {
+                    "passed": False, "reasons": [f"Ordinary consumer fixture differs at {label}"],
+                }
+            atomic_write_json(report_path, report)
+            return passed
+
+        if not check_fixture("before_warmup"):
+            raise EvalError("Ordinary consumer fixture changed before native warmup")
         home_context = native.authenticated_home(native_auth) if native else _null_context()
         with home_context as native_home:
             if native:
@@ -2117,6 +2222,8 @@ def main() -> None:
                 report["native_warmup_red"] = warmup
                 atomic_write_json(report_path, report)
             for phase in phases:
+                if not check_fixture(f"before_{phase}"):
+                    raise EvalError(f"Ordinary consumer fixture changed before {phase.upper()} model calls")
                 context = staged_skill(skill_dir, stage_target) if phase == "green" else _null_context()
                 with context:
                     def execute(case: EvalCase, run_number: int) -> dict:
@@ -2181,6 +2288,8 @@ def main() -> None:
                     "summary": summarize_phase(phase_cases),
                 }
                 atomic_write_json(report_path, report)
+                if not check_fixture(f"after_{phase}_cleanup"):
+                    raise EvalError(f"Ordinary consumer fixture changed after {phase.upper()} cleanup")
             if native:
                 report["native_restored_red"] = native.restored_snapshot(
                     cdx, workdir, native_home, args.model, args.reasoning_effort,
@@ -2190,7 +2299,13 @@ def main() -> None:
 
         gate_reasons = []
         if native:
+            check_fixture("after_native_cleanup")
+            fixture_reasons = report.get("ordinary_fixture_gate", {}).get("reasons", [])
+            report["ordinary_fixture_gate"] = {
+                "passed": not fixture_reasons, "reasons": fixture_reasons,
+            }
             isolation_reasons = native.report_inventory_reasons(report, stage_target)
+            isolation_reasons.extend(fixture_reasons)
             report["isolation_gate"] = {
                 "profile": native.PROFILE, "passed": not isolation_reasons,
                 "reasons": isolation_reasons,

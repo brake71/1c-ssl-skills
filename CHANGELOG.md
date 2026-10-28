@@ -1,6 +1,20 @@
 # Changelog
 
-## v0.16 — локальный кандидат, не опубликован
+## v0.16 — актуальный кандидат к публикации
+
+- После раннего локального кандидата добавлены штатный fixture/resume-контроль
+  (schema 7), одиннадцатый activation-сценарий прогресса и уточнение scope
+  для публичного/служебного API. Покрытие самостоятельной активации: **6/24**.
+- Frozen `gpt-6-sol` / medium на текущем payload: **232 tests PASS**, API
+  **664/664**, semantic **0/0**; полный guided 3× **27/27 majority, 80/81
+  individual**, activation 3× **11/11, 32/33**, quality/fixture/isolation
+  gates PASS. В guided один безопасный guard не принят regex, в activation
+  один верный отказ не активировал скил. Все raw FAIL сохранены.
+- Для сборки из Git-дерева архивный skill fingerprint необходимо сверить с
+  `a531b00ada743f832e159868c669c6d68ff120f2d0c2c4f0269141fca68e51d6`;
+  [raw audit и границы P5](reports/bsp-skills/p5-sol-full-matrix-after-limit-recovery.md).
+
+### Ранний локальный кандидат на `5f9aefe` (историческая граница)
 
 - Activation-корпус расширен с 6 до 10 сценариев, coverage с 2/24 до
   **5/24 references**. `secondary_references` и schema 6 требуют успешного
@@ -22,8 +36,9 @@
   quality FAIL сохранены; original infrastructure FAIL не переписан.
   Parent перепроверил 226 final outcomes; known-credential scans:
   916 native и 510 packaging файлов, 0 совпадений.
-- Tag/push/release не выполнялись. Исторические FAIL и ограничения сохранены;
-  docs-only финал не меняет проверенные payload/runner/corpus bytes.
+- На этапе этой ранней проверки tag/push/release не выполнялись.
+  Исторические FAIL и ограничения сохранены; docs-only финал не менял
+  проверенные тогда payload/runner/corpus bytes.
   [Готовность локального кандидата и оставшийся долг](reports/bsp-skills/v0.16-release-candidate-readiness.md).
 
 ## v0.15 — native isolation, discovery и проверка поставки

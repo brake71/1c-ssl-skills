@@ -16,7 +16,7 @@
     "files-and-versions.md": [],
     "forms-validation.md": [],
     "fundamentals.md": ["neutral-public-api-boundary"],
-    "longs-and-jobs.md": [],
+    "longs-and-jobs.md": ["neutral-background-progress"],
     "multilang.md": [],
     "perf-monitoring.md": [],
     "prefixes.md": [],

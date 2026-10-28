@@ -82,9 +82,10 @@ class SecondaryReferenceTests(unittest.TestCase):
         with self.assertRaisesRegex(runner.EvalError, "duplicate case"):
             runner.validate_reference_matrix(cases, refs, unscoped, self.references)
 
-    def test_schema_five_resume_is_rejected(self):
-        with self.assertRaisesRegex(runner.EvalError, "schema_version=6"):
-            runner.validate_resume_report({"schema_version": 5}, {})
+    def test_pre_fixture_manifest_resume_is_rejected(self):
+        for version in (5, 6):
+            with self.subTest(version=version), self.assertRaisesRegex(runner.EvalError, "schema_version=7"):
+                runner.validate_resume_report({"schema_version": version}, {})
 
     def _events(self, names):
         return [native.normalized_item({

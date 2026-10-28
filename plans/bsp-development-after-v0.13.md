@@ -59,40 +59,78 @@ allrefs-read, согласованная матрица. P3 evidence-пилот 
 
 | Приоритет | Статус после локального v0.16 | Следующий результат |
 |---|---|---|
-| P0 — воспроизводимость | Runtime inventory и внешний fixture/resume контроль проверены | Встроить ordinary manifests в штатный runner/resume |
-| P1 — покрытие поведения | Первая партия завершена: activation 5/24; общий пробел 19/24 | Следующая риск-ориентированная партия и синхронная матрица |
-| P2 — отказы качества | Подтверждённые defects исправлены; два activation FAIL сохранены | Узкий разбор caller wording и платформенного ответа |
-| P3 — авторинг | Evidence-пилот выполнен для первой партии | Проверять источники следующих выбранных правил |
-| P4 — устойчивость и релиз | Локальный v0.16 проверен, не опубликован | Контроль стоимости; публикация только по разрешению |
+| P0 — воспроизводимость | Штатный manifest/resume-контроль в рабочем дереве; guided и activation native 3×: fixture/isolation PASS | Сохранить prospective контроль на следующей границе |
+| P1 — покрытие поведения | 11 кейсов, 6/24 references; на текущей границе `gpt-6-sol` progress 3/3, activation 11/11 majority | Не переносить результат на другие модели и все 24 темы |
+| P2 — отказы качества | Текущие sol activation 32/33, guided 80/81; оба gates PASS; два individual FAIL сохранены | Разобрать guard attached-file с paired controls, не переписывать FAIL |
+| P3 — авторинг | Evidence-пилот выполнен; клиентский контекст прогресса уточнён | Проверять источники следующих выбранных правил |
+| P4 — устойчивость и релиз | Один native sol 3× на рабочем дереве прошёл, но точный архив/установщики не проверены | Frozen packaging и прогоны извлечённого payload; публикация только по разрешению |
 
-**Ближайшая итерация — штатный fixture-контроль P0, затем новая P1-партия.**
+**Текущая итерация — удержать проверенную sol-границу, разобрать оставшийся guided false negative до релизной упаковки.**
 
-1. Встроить prospective ordinary manifests в native runner и resume без
-   изменения skill: сравнение исходного/текущего fixture до модели и после
-   cleanup, явные exclusions `.git` и точного staged BSP. Защитить positive
-   resume и изменение fixture paired tests; старые отчёты без manifests
-   не объявлять доказанной fixture-изоляцией.
-2. Отдельно разобрать два текущих activation FAIL по raw evidence, не
-   повторять их до случайного PASS. Wordings править только с paired controls;
-   отсутствие BSP activation не делает неверный platform API правильным.
-3. Для следующей P1-партии выбрать ещё не покрытые рискованные темы,
-   например `longs-and-jobs.md`, `classifiers.md`, `data-exchange.md` или
-   `esign-mcd.md`. Это кандидаты, не готовые prompts или обещание покрытия.
-   Сначала документация 3.1.11, затем исходники и negative controls.
+1. Штатные ordinary manifests уже встроены в native runner/resume (schema 7):
+   исключаются `.git` и точный staged BSP, а изменение fixture блокирует
+   продолжение. Unit-регрессии покрывают успешный resume и изменения до/после
+   фаз и cleanup. Первый пробный native 1× под системным `Temp` дал fixture/
+   isolation PASS, но GREEN quality FAIL: raw-команды чтения consumer завершились
+   `os error 5` и скил не был прочитан. Результат сохранён, не переоценён.
+   Отдельный новый targeted native 1× в доступном Git-корне дал GREEN quality,
+   fixture и isolation PASS. Отчёты schema 6 без baseline нельзя возобновлять.
+2. Два activation FAIL разобраны по raw evidence. Точная print-формулировка
+   теперь принимается узким дополнительным критерием с отрицательными
+   контролями; новый targeted native RED/GREEN 1× PASS. Отдельный платформенный
+   ответ с `РегистрацияИзменений` остаётся FAIL: нужен `ПланыОбмена`, отсутствие
+   BSP activation не исправляет неверный механизм. Исторические FAIL сохранены;
+   на новой полной матрице печать и платформенный обмен прошли 3/3 каждый.
+3. Первая новая P1-тема `longs-and-jobs.md` уже добавлена после проверки
+   документации 3.1.11 и исходников: два контекста прогресса, paired controls,
+   indexed targeted native 1× PASS; корпус/матрица теперь 11 кейсов, 6/24.
+   См. [evidence и границы](../reports/bsp-skills/p1-progress-activation-followup.md).
+   Следующую тему (`classifiers.md`, `data-exchange.md` или `esign-mcd.md`)
+   брать только после оценки отдельного риска, а не для роста числа файлов.
 4. Prompts не раскрывают skill paths; корпус и матрица обновляются вместе.
    Сохранять прежние negatives/version boundary, проверять каждый declared
    reference сквозной задачи. Не размножать кейсы ради числа файлов.
-5. Проверить новую frozen границу: static/dry-run, targeted native,
-   полные guided и activation 3× на точном извлечённом payload, prospective
-   manifests и независимый raw audit. Исторические FAIL не пересчитывать.
+5. На новой frozen границе static/dry-run и полные guided/activation native 3×
+   на точном извлечённом payload прошли по итоговым gates; prospective manifests
+   и raw audit проверены. Guided individual **78/81**, exact-read **77/78**;
+   activation individual **31/33**, exact-read **20/21**. Причины пяти FAIL
+   и raw evidence: [новый отчёт](../reports/bsp-skills/p1-full-native-3x-followup.md).
+   С тех пор scorer и version criterion изменены: два false negative закрыты
+   paired tests и targeted native 1×. Новый полный guided 3× дал 81/81, а
+   activation 3× — 28/33 и **gate FAIL** по strict read 6/7: нейтральный
+   public/service кейс не активировал скил 2/3. Пять новых individual FAIL
+   сохранены без retry. [Новый raw-отчёт](../reports/bsp-skills/p2-full-native-gate-failure.md).
+   Старый полный 3× остаётся самостоятельным историческим baseline.
+6. На следующей границе дополнено описание `SKILL.md`: нейтральный
+   exported/common-module service review явно ведёт в `fundamentals.md`,
+   platform-only остаётся вне активации. Static и парные targeted 1× PASS;
+   новый полный activation 3× — **11/11 majority, 31/33 individual**, positive
+   activation/read **24/24 и 21/21**, false activation **0/9**, но **GREEN gate
+   FAIL**: платформа без активации BSP предложила запрещённый
+   `ОбменДанными.ЗарегистрироватьИзменения(...)` в одном запуске. Второй FAIL —
+   RLS-отказ при успешном чтении двух reference. Guided full 3× на новых
+   байтах **не проводился**. Исходные FAIL и [отчёт](../reports/bsp-skills/p3-neutral-api-scope-activation-followup.md)
+   сохранены; повторять quality slots ради PASS нельзя.
+7. Платформенную ошибку проверили отдельно на `gpt-6-sol`: platform-only
+   RED/GREEN по 3/3, без BSP activation, но первый sol full activation имел
+   progress 0/3. После paired scorer-регрессии для серверного фрагмента и
+   уточнения клиентского контекста в `longs-and-jobs.md` новая **frozen sol**
+   матрица на рабочем дереве: activation **11/11 majority, 32/33 individual**,
+   progress/platform по **3/3**; guided после штатного `--resume` только 65
+   infrastructure слотов **27/27, 80/81 individual**. Оба quality/fixture/
+   isolation gates PASS, raw replay 228/228. Два individual FAIL сохранены:
+   version-boundary без активации и attached-file guard с иным именем
+   переменной. [Новый отчёт](../reports/bsp-skills/p5-sol-full-matrix-after-limit-recovery.md).
+   Это не публикация и не проверка точного ZIP/tar.gz.
 
 ```mermaid
 flowchart TD
-    A[Встроить fixture manifests] --> B[Проверить resume controls]
-    B --> C[Выбрать новые сценарии]
-    C --> D[Источники и paired criteria]
-    D --> E[Корпус и матрица]
-    E --> F[Frozen native и отчёт]
+    A[Sol activation и guided 3×] --> B[Оба gates PASS]
+    B --> C[Два individual FAIL сохранены]
+    C --> D[Paired разбор attached-file]
+    D --> E[Новая frozen граница при правке]
+    E --> F[Архив и упакованные установщики]
+    F --> G[Публикация только по разрешению]
 ```
 
 ## P0 — чистая и воспроизводимая база сравнений
@@ -107,8 +145,19 @@ Credentials используются только в защищённом dispos
 В последних discovery и candidate циклах ordinary consumer manifests
 сохранены до/после каждого этапа и независимо проверены. Поэтому повторять
 задачу «получить первый baseline с manifest» больше не требуется.
-**Открыто:** встроить этот контроль в штатный runner и проверку `resume`;
-обычные consumer-файлы пока не входят в isolation gate/resume fingerprints.
+**В текущем рабочем дереве реализовано:** штатный native runner сохраняет
+SHA-256 manifest обычных файлов до вызовов модели, сверяет его до/после фаз,
+после cleanup и до `resume`. Изолированный gate включает fixture; schema 7
+блокирует старые отчёты без встроенного baseline. `.git` и только точный
+`<consumer>/.agents/skills/bsp` исключены, связанные обычные пути запрещены.
+Positive/negative unit-тесты, targeted native 1× и новые полные guided и
+activation 3× на внешнем Git-корне прошли по итоговым gates: fixture/isolation
+PASS, staged skill удалён.
+Отчёт: `.tmp/p0-native-fixture-project-smoke.json` (локальный, не поставляется).
+Первый пробный отчёт `.tmp/p0-native-fixture-smoke.json` сохранён с GREEN FAIL:
+consumer в системном `Temp` не читался native-командами (`os error 5`);
+fixture/isolation всё же PASS. Полные 3× теперь выполнены для текущих runner/corpus/payload, но не для
+будущих правок и не заменяют проверку архивов/установщиков перед релизом.
 Исторические manifests отсутствуют и задним числом не восстанавливаются.
 [Границы прежнего resume](../reports/bsp-skills/v0.14-0749271-review-followup.md).
 
@@ -122,9 +171,9 @@ Credentials используются только в защищённом dispos
 2. Зафиксировать одинаковые модель, effort, задачи и consumer для RED/GREEN;
    единственное запланированное отличие — staged `bsp` в GREEN. Сохранить
    fingerprints скила, runner, корпуса и матрицы, actual skill catalog и
-   ordinary fixture manifest до запуска/после cleanup. До автоматизации
-   manifest остаётся обязательной отдельной проверкой; перед `resume`
-   сравнить с исходным. Нет исходного manifest — нет доказанного fixture resume.
+   ordinary fixture manifest до запуска/после cleanup. Штатный native runner
+   сверяет baseline до `resume`; исторические schema 6 не имеют встроенного
+   baseline и не подтверждают fixture resume.
 3. Использовать проверенный распакованный v0.16 или точно зафиксированную кандидатную
    ревизию; указать источник `--skill`. Native результаты не переносить на
    стандартный/исторический `exec`. Инфраструктурные ошибки сохранять как FAIL.
@@ -136,11 +185,15 @@ Credentials используются только в защищённом dispos
 
 ## P1 — границы активации и покрытие поведения
 
-**Открыто:** дальнейшее расширение activation **5/24** и устойчивость границ.
-Первая партия уже завершена; scope-before-open, explicit BSP API review,
-library migration и allrefs-read проверены, не считать их будущими правками.
-Последняя выборка activation **28/30** сохранила два FAIL и не отменяет
-исторических platform-only ошибок или будущих ложных активаций.
+**После v0.16:** локальная матрица расширена с 5/24 до **6/24** references
+и с 10 до 11 кейсов; для `longs-and-jobs.md` есть indexed targeted 1×,
+первый полный 3× (2/3) и второй полный 3× (3/3). Второй полный activation
+не прошёл read gate; третий на уточнённом scope прошёл coverage/read, но
+провалил forbidden gate другого платформенного кейса. Отдельная текущая
+sol-граница дала progress 3/3 и полный activation gate PASS. Первая партия v0.16 завершена; scope-before-open, explicit BSP
+API review, library migration и allrefs-read не считать будущими правками.
+Историческая выборка activation **28/30** сохранила два FAIL и не отменяет
+platform-only ошибок или будущих ложных активаций.
 
 - Сохранять три существующие отрицательные задачи обычного BSL/платформы:
   правильный ответ и отсутствие BSP activation проверяются раздельно.
@@ -165,10 +218,39 @@ activation. Полный прогон перед релизом включает
 
 ## P2 — разбор ошибок качества без ослабления gate
 
-**Текущие открытые случаи** из v0.16 activation: `neutral-print-registration`
-#3 — непринятый caller wording при корректных code patterns; platform-only
-`neutral-platform-exchange-registration` #2 — нет требуемого `ПланыОбмена`.
-Guided этой выборки 81/81, но прежние FAIL не объявляются причинно исправленными.
+**На первой границе после v0.16:** полные guided/activation 3× прошли majority
+и gates, но пять individual FAIL сохранены. Guided: ошибка имени хука,
+смешанный `rg` exit 1 и исключённый верный BSL fence при предупреждении о
+другом вызове. Activation: прогресс без включённого флага/точного чтения и
+непринятая формулировка ограничения версии. [Raw audit и следующий
+разбор](../reports/bsp-skills/p1-full-native-3x-followup.md). Первым шагом
+для двух дефектов scorer уже добавлены paired controls, исправлены узкие
+критерии и прошли новые targeted native 1×. [Отчёт
+P2](../reports/bsp-skills/p2-wording-and-context-followup.md). Реальные ошибки
+ответа не превращать в PASS правкой критериев. На изменённой границе
+guided полный 3× **81/81**, activation **28/33**, strict read 6/7 и
+**GREEN gate FAIL**. Причины пяти FAIL, включая пропуск активации
+public/service в 2/3: [raw-отчёт](../reports/bsp-skills/p2-full-native-gate-failure.md).
+Узкая правка scope теперь дала public/service 3/3 и strict read 7/7 на новой
+activation матрице, но forbidden BSP call в platform-only задаче сохранил
+**GREEN gate FAIL**; RLS 1/3 отказался от документированного метода после
+чтения reference. [Отчёт того payload](../reports/bsp-skills/p3-neutral-api-scope-activation-followup.md).
+
+**Текущая sol-граница:** после двух ограниченных поправок прогресса и
+восстановления только 65 инфраструктурных guided-слотов оба full 3× gates
+PASS. Activation 32/33 (version-boundary без активации), guided 80/81:
+`save-attached-file-public-boundary` с безопасным guard переменной `Данные`
+не принят regex, допускающим только другие имена. [Raw evidence и границы](../reports/bsp-skills/p5-sol-full-matrix-after-limit-recovery.md).
+Проверить эту гипотезу paired controls; не превращать исходный FAIL в PASS
+без новой frozen проверки.
+
+**Исторические случаи** из v0.16 activation: `neutral-print-registration`
+#3 — непринятый caller wording при корректных code patterns; теперь есть
+точная fixture, узкая альтернативная формулировка и paired negative tests;
+новый targeted native 1× PASS, прежний raw FAIL не переписан. Platform-only
+`neutral-platform-exchange-registration` #2 — нет требуемого `ПланыОбмена`;
+paired test подтверждает дефект ответа, не scorer. Guided той выборки 81/81,
+но прежние FAIL не объявляются причинно исправленными.
 
 **Исторические случаи** из candidate guided v0.15, исходные verdicts сохранены:
 
@@ -223,7 +305,9 @@ Guided этой выборки 81/81, но прежние FAIL не объявл
 - Поддерживать smoke нескольких разных границ, но не заменять им полные
   RED/GREEN 3×. Проверку другой модели хранить отдельно.
 - Следующую поставку проверять как архив: точные payload bytes, оба
-  установщика, dry-run и свежие native-прогоны извлечённого `--skill`.
+  установщика и совпадение fingerprint с native 3× на замороженном скиле.
+  При тех же входных байтах и критериях прогон из извлечённого архива не
+  повторять; при изменении любого из них понадобится новая frozen проверка.
   GitHub publication/assets verification отдельно от локального packaging.
 - Сохранять единый скил и существующий простой harness. Hosted-агенты,
   self-modification, BDI, latent briefing, постоянная память и универсальный

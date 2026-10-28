@@ -58,8 +58,8 @@ class EvalCorpusTests(unittest.TestCase):
             REPO_ROOT / "evals" / "activation-reference-matrix.json"
         )
         runner.validate_reference_matrix(cases, references, unscoped, SKILL_DIR / "references")
-        self.assertEqual(len(cases), 10)
-        self.assertEqual(sum(bool(ids) for ids in references.values()), 5)
+        self.assertEqual(len(cases), 11)
+        self.assertEqual(sum(bool(ids) for ids in references.values()), 6)
         self.assertEqual(sum(not c.should_trigger for c in cases), 3)
         self.assertEqual(len(unscoped), 4)
         self.assertIsNone(next(c.reference for c in cases if c.id == "other-version-api-boundary"))

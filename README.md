@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.
 Чтобы установить конкретный тег или коммит, передайте `--ref`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.15
+curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.16
 ```
 
 Если не хочется выполнять загруженный код через pipe, сначала сохраните и
@@ -59,7 +59,7 @@ irm https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.ps1 -Ou
 .\install.ps1 -Agent Codex
 .\install.ps1 -Agent OpenCode
 .\install.ps1 -Target C:\path\to\skills
-.\install.ps1 -Agent Codex -Ref v0.15
+.\install.ps1 -Agent Codex -Ref v0.16
 Remove-Item .\install.ps1
 ```
 
@@ -167,12 +167,12 @@ fingerprint скила. Архивы содержат только `skills/bsp`,
 фиксирует LF для поставки, а fingerprint сортирует относительные POSIX-имена
 одинаково на Windows и Linux.
 
-Перед публикацией проверьте установку и повторное обновление из `extracted/`
-обоими упакованными установщиками в локальный путь с пробелами. Затем выполните
-smoke и полный RED/GREEN-прогон с `--skill` на **распакованном** скиле и `--dir`
-на отдельном потребительском Git-проекте без исходников БСП. Сверьте fingerprint
-отчёта с manifest. PASS другого checkout или старого архива не заменяет эту
-проверку. Сборка и проверки не создают тег и не публикуют релиз.
+Перед публикацией проверьте установку из `extracted/` обоими упакованными
+установщиками в локальный путь с пробелами. Сверьте fingerprint и состав
+`extracted/skills/bsp` с проверенным native 3× скилом, а runner и corpora —
+с отчётами; при одинаковых байтах повторять полный прогон из архива не нужно.
+При изменении скила или критериев оценки понадобится новая frozen проверка.
+Сборка и проверки не создают тег и не публикуют релиз.
 
 Результаты опубликованного v0.14: [проверка скачанных архивов и релиза](reports/bsp-skills/v0.14-published-verification.md), [качество кандидата и ограничения](reports/bsp-skills/v0.14-release-candidate-readiness.md). История v0.13 — [проверка готовности](reports/bsp-skills/v0.13-release-readiness.md).
 
@@ -368,7 +368,7 @@ individual FAIL сохранены; это не исправление исто�
 ошибок и не полное activation coverage (2/24 references).
 [Проверка поставки, raw FAIL и ограничения](reports/bsp-skills/7b1abc7-release-candidate-readiness.md).
 
-Локальный кандидат **v0.16** на frozen `5f9aefe`: **217 tests PASS**, API
+Ранний локальный кандидат **v0.16** на frozen `5f9aefe`: **217 tests PASS**, API
 **664/664**, semantic **0/0**; две идентичные сборки и оба упакованных
 установщика PASS. На реально извлечённом ZIP: smoke/RLS **1/1** каждый,
 guided **27/27 majority, 81/81 individual**, activation **10/10, 28/30**;
@@ -377,8 +377,17 @@ activation positive/allrefs-read **21/21 и 18/18**, false activation **0/3
 и 0/9**. Coverage самостоятельной активации расширен до **5/24**.
 Одна provider-capacity попытка восстановлена в отдельной копии; 59 завершённых
 outcomes, включая два quality FAIL, и исходный infrastructure FAIL сохранены.
-Это не Git-тег и не публикация; команды установки по ref остаются на v0.15.
-[Поставка, фактические результаты и ограничения v0.16](reports/bsp-skills/v0.16-release-candidate-readiness.md).
+Это историческая граница, не финальный payload релиза.
+[Поставка и ограничения раннего кандидата](reports/bsp-skills/v0.16-release-candidate-readiness.md).
+
+На более поздней границе `gpt-6-sol` / medium (`skills/bsp` fingerprint
+`a531b00ada743f832e159868c669c6d68ff120f2d0c2c4f0269141fca68e51d6`):
+232 unit tests PASS, API 664/664, семантика 0/0; полный native guided
+**27/27 majority, 80/81 individual**, activation **11/11, 32/33**;
+quality/fixture/isolation gates PASS. Два individual FAIL и ограничения
+описаны в [отчёте P5](reports/bsp-skills/p5-sol-full-matrix-after-limit-recovery.md).
+Для выпуска требуется сверить точные файлы Git-архива с этим fingerprint;
+проверку раннего архива нельзя выдавать за проверку текущего.
 
 ### Native preflight изоляции (без вызова модели)
 
