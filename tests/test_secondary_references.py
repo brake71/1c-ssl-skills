@@ -123,7 +123,7 @@ class SecondaryReferenceTests(unittest.TestCase):
         self.root.mkdir(exist_ok=True)
         auth = {"auth_mode": "chatgpt", "tokens": {"access_token": "secret", "account_id": "acct"}}
         (self.root / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
-        snapshot = {"skills": [], "config_sha256": "cfg"}
+        snapshot = {"skills": [], "config_sha256": "cfg", "thread_profile": {"model": runner.DEFAULT_MODEL}}
         for names, expected in ((case.required_references, True), (("users-access.md",), False)):
             events = self._events(names)
             with self.subTest(names=names):
@@ -150,7 +150,7 @@ class SecondaryReferenceTests(unittest.TestCase):
                             [], {"status": "completed"}, "turn",
                         )):
                     native_result = native.run_native(
-                        "cdx", case, self.root, self.root, "red", 1, "model", "medium", 1,
+                        "cdx", case, self.root, self.root, "red", 1, runner.DEFAULT_MODEL, "medium", 1,
                         "bsp", self.root, "source", native.auth_identity(auth),
                     )
                 self.assertEqual(exec_result["expected_reference_read"], expected)

@@ -209,6 +209,9 @@ def run_native(cdx, case, workdir, artifact_dir, phase, run_number, model, effor
         before, thread = probe.capture_snapshot(client, workdir, home, environment, initialized)
         before["auth_identity_sha256"] = identity_sha256
         before["native_account_sha256"] = probe.digest(account)
+        if before.get("thread_profile", {}).get("model") != model:
+            reasons.append(f"Native runtime did not select {model}")
+            raise probe.ProbeError(reasons[-1])
         thread_id = thread.get("thread", {}).get("id")
         if not isinstance(thread_id, str) or not thread_id:
             raise probe.ProbeError("Native thread/start omitted thread identity")

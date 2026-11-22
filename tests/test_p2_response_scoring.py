@@ -54,6 +54,24 @@ class P2ResponseScoringTests(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertEqual(runner.executable_bsl_blocks(label + "\n" + block), [])
 
+    def test_platform_call_survives_warning_about_another_qualified_module(self):
+        case = self.cases["exchange-register-changes"]
+        code = "```bsl\nПланыОбмена.МойПлан.ЗарегистрироватьИзменения(Узел, Документ);\n```"
+        suffix = ("\n\nЛожный очевидный вызов `ОбменДанными.ЗарегистрироватьИзменения(...)`: "
+                  "общего модуля `ОбменДанными` в БСП нет.")
+        response = "Используйте публичный метод платформы на сервере:\n" + code + suffix
+        self.assertEqual(len(runner.executable_bsl_blocks(response)), 1)
+        self.assertTrue(runner.score_response(case, response, {})["passed"])
+        for wrong in (
+            response.replace("ПланыОбмена.МойПлан", "ОбменДанными"),
+            response + "\nПланыОбмена.МойПлан.ЗарегистрироватьИзменения вызывать нельзя.",
+            response.replace("ПланыОбмена.МойПлан.ЗарегистрироватьИзменения", "ПланыОбмена.МойПлан.ЗаписатьИзменения"),
+        ):
+            with self.subTest(wrong=wrong[-110:]):
+                self.assertFalse(runner.score_response(case, wrong, {})["passed"])
+        self.assertEqual(runner.executable_bsl_blocks(
+            "Ложный очевидный вызов:\n" + code), [])
+
     def test_argument_warning_cannot_override_direct_call_prohibition(self):
         block = "```bsl\nОтправкаSMS.ОтправитьSMS(НомераПолучателей, Текст);\n```"
         for note in ("Этот вызов не следует использовать; логин в этот вызов передавать не нужно.",

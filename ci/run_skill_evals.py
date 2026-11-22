@@ -47,7 +47,7 @@ DEFAULT_REFERENCE_MATRIX = REPO_ROOT / "evals" / "reference-matrix.json"
 DEFAULT_SKILL = REPO_ROOT / "skills" / "bsp"
 DEFAULT_WORKDIR = REPO_ROOT / "src"
 DEFAULT_BSL_SRC = REPO_ROOT / "src" / "cf"
-DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_MODEL = "gpt-6-luna"
 REPORT_SCHEMA_VERSION = 7
 SKILL_CACHE_PATTERNS = ("__pycache__", "*.pyc", "*.pyo")
 WINDOWS_READING_INSTRUCTIONS = (
@@ -902,6 +902,12 @@ def bsl_blocks(response: str) -> list[str]:
 
 
 def warning_targets_same_call(context: str, code_syntax: str) -> bool:
+    # Platform manager calls may have three components, e.g. Plans.Name.Method.
+    # The two-component CALL_RE cannot identify their qualified method.
+    nested_calls = {
+        match.group("path").lower()
+        for match in re.finditer(r"(?<![\w.])(?P<path>\w+\.\w+\.\w+)\s*\(", code_syntax)
+    }
     code_calls = {
         (call.group("module").lower(), call.group("method").lower())
         for call in CALL_RE.finditer(code_syntax)
@@ -916,6 +922,10 @@ def warning_targets_same_call(context: str, code_syntax: str) -> bool:
         )
         if not NEGATIVE_BLOCK_RE.search(warning_clause):
             continue
+        normalized_clause = normalize_member_access(warning_clause).lower()
+        if any(re.search(r"(?<![\w.])" + re.escape(path) + r"(?![\w.])", normalized_clause)
+               for path in nested_calls):
+            return True
         references = {
             (reference.group("module").lower(), reference.group("method").lower())
             for reference in MEMBER_REFERENCE_RE.finditer(clause)
@@ -933,6 +943,19 @@ def warning_targets_same_call(context: str, code_syntax: str) -> bool:
 
 def negative_example_context(context: str, code_syntax: str) -> bool:
     """Require evidence that a warning labels this snippet, not other advice."""
+    wrong_call = re.search(
+        r"(?:^|(?<=[.!?])\s+)(?:ложн|ошибочн|неверн)\w*\s+"
+        r"(?:очевидн\w*\s+)?вызов\s+"
+        r"`(?P<module>\w+)\.(?P<method>\w+)\([^`]*\)`", context, re.I,
+    )
+    if wrong_call:
+        named = (wrong_call.group("module").lower(), wrong_call.group("method").lower())
+        executable_calls = {
+            (call.group("module").lower(), call.group("method").lower())
+            for call in CALL_RE.finditer(code_syntax)
+        }
+        if named not in executable_calls and not warning_targets_same_call(context, code_syntax):
+            return False  # The named bad call belongs to another module.
     if re.search(
         r"(?:ложн\w*|ошибочн\w*|неправильн\w*|неверн\w*)\s+"
         r"(?:очевидн\w*\s+)?(?:пример|код|вариант|вызов|API|реализац|сигнатур)\w*|"
@@ -1352,10 +1375,14 @@ def labeled_server_progress_fragment(response: str, executable_blocks: list[str]
     for match in BSL_FENCE_RE.finditer(response):
         prefix = response[previous_end:match.start()]
         previous_end = match.end()
-        label = re.split(r"\n\s*\n", prefix.rstrip())[-1]
-        if not re.search(
-            r"^\s*\*{0,2}(?:внутри|в теле)\s+(?:выполняемой\s+)?"
-            r"(?:в\s+фоне\s+)?серверной\s+функции\s*:\*{0,2}\s*$", label, re.I,
+        label = re.sub(r"\*\*", "", re.split(r"\n\s*\n", prefix.rstrip())[-1]).strip()
+        if not re.fullmatch(
+            r"(?:для\s+БСП\s+3\.1\.11\s+)?(?:добавьте\s+)?"
+            r"(?:внутри|в\s+тело|в\s+теле)\s+(?:уже\s+)?(?:выполняемой\s+)?"
+            r"(?:в\s+фоне\s+)?серверной\s+функции"
+            r"(?:,\s+которую\s+выполняет\s+длительная\s+операция)?"
+            r"(?:\s+(?:сообщайте\s+процент\s+после\s+обработки\s+очередной\s+порции|"
+            r"сообщение\s+о\s+ходе\s+работы))?:", label, re.I,
         ):
             continue
         code = match.group("code")
@@ -1859,6 +1886,12 @@ def summarize_phase(cases: list[dict]) -> dict:
         "trigger_cases": len(trigger_cases),
         "activated_cases": activated_cases,
         "activation_rate": activated_cases / len(trigger_cases) if trigger_cases else 1.0,
+        "false_activation_runs": sum(
+            bool(run["skill_activated"])
+            for case in cases if not case["should_trigger"]
+            for run in case["runs"]
+            if (run.get("status") or execution_status(run)) in {"completed", "quality_failed"}
+        ),
         "reference_cases": len(reference_cases),
         "reference_read_cases": reference_read_cases,
         "reference_read_rate": (
@@ -1958,7 +1991,7 @@ def green_gate_reasons(
             "reference_read_rate must be 100%, got "
             f"{summary['reference_read_rate']:.1%}"
         )
-    for metric in ("invalid_methods", "unsafe_calls", "forbidden_hits", "failed_processes"):
+    for metric in ("false_activation_runs", "invalid_methods", "unsafe_calls", "forbidden_hits", "failed_processes"):
         if summary[metric]:
             reasons.append(f"{metric} must be 0, got {summary[metric]}")
     return reasons
@@ -1974,6 +2007,7 @@ def print_summary(report: dict) -> None:
         print(
             f"{phase.upper():5} pass={summary['passed_cases']}/{summary['cases']} "
             f"activation={summary['activated_cases']}/{summary['trigger_cases']} "
+            f"false-activation={summary['false_activation_runs']} "
             f"reference-read={summary['reference_read_cases']}/{summary['reference_cases']} "
             f"invalid={summary['invalid_methods']} unsafe={summary['unsafe_calls']} "
             f"forbidden={summary['forbidden_hits']} "
@@ -2008,8 +2042,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="native: opt-in app-server profile with same-process per-turn inventory")
     parser.add_argument("--auth-file", help="native only: existing ChatGPT auth.json outside consumer root")
     parser.add_argument(
-        "--model", default=DEFAULT_MODEL,
-        help=f"Exact model id (default: {DEFAULT_MODEL})",
+        "--model", default=DEFAULT_MODEL, choices=(DEFAULT_MODEL,),
+        help="Model pinned for all BSP eval runs",
     )
     parser.add_argument(
         "--reasoning-effort", choices=("low", "medium", "high", "xhigh"),

@@ -49,6 +49,7 @@ jobs:
         run: |
           python -m py_compile skills/bsp/scripts/bsp_api.py
           python -m py_compile ci/validate_key_methods.py
+          python -m py_compile ci/check_critical_examples.py
           python -m py_compile ci/run_skill_evals.py
           python -m py_compile ci/build_release.py
 
@@ -57,6 +58,9 @@ jobs:
 
       - name: Enforce API claim coverage
         run: python ci/validate_key_methods.py --coverage-only
+
+      - name: Check critical BSL examples
+        run: python ci/check_critical_examples.py
 
       - name: Validate behavioral eval corpus and harness
         run: >-

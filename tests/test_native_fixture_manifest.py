@@ -46,7 +46,7 @@ class NativeFixtureManifestTests(unittest.TestCase):
             "native_helper_sha256": runner.file_sha256(Path(native.__file__)),
             "native_probe_sha256": runner.file_sha256(Path(native.probe.__file__)),
             "auth_identity_sha256": native.auth_identity(native.load_auth(self.auth)),
-            "model": "model", "reasoning_effort": "medium", "skill": str(runner.DEFAULT_SKILL),
+            "model": runner.DEFAULT_MODEL, "reasoning_effort": "medium", "skill": str(runner.DEFAULT_SKILL),
             "workdir": str(self.workdir), "bsl_src": None, "selected_cases": [case_id],
             "corpus_sha256": runner.file_sha256(runner.DEFAULT_CASES),
             "reference_matrix_sha256": runner.file_sha256(runner.DEFAULT_REFERENCE_MATRIX),
@@ -68,7 +68,7 @@ class NativeFixtureManifestTests(unittest.TestCase):
             yield self.root
         args = ["runner", "--transport", "native", "--dir", str(self.workdir),
                 "--case", "message-bound-to-field", "--bsl-src", "",
-                "--auth-file", str(self.auth), "--runs", "1", "--model", "model",
+                "--auth-file", str(self.auth), "--runs", "1",
                 "--reasoning-effort", "medium", "--output", str(self.output)]
         if resume:
             args.append("--resume")

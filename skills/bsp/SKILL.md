@@ -1,6 +1,6 @@
 ---
 name: bsp
-description: "\u0411\u0421\u041f / \u0431\u0438\u0431\u043b\u0438\u043e\u0442\u0435\u0447\u043d\u0430\u044f \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u0446\u0438\u044f 1\u0421. In standard subsystems, exported common module \u0412\u044b\u0437\u043e\u0432\u0421\u0435\u0440\u0432\u0435\u0440\u0430 / \u0421\u043b\u0443\u0436\u0435\u0431\u043d\u044b\u0439\u041f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u043d\u044b\u0439\u0418\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441 stability or client/server execution? Read fundamentals.md even without BSP name. Scope before opening: Explicit BSP API review, including method existence -> matching-version reference. A migration/update handler using a library to save without business logic/exchange registration -> read before write, even without a BSP name or version. \u041e\u0448\u0438\u0431\u043a\u0430 \u0443 \u043f\u043e\u043b\u044f \u0444\u043e\u0440\u043c\u044b \u0438 \u041e\u0442\u043a\u0430\u0437 \u0432 \u0440\u0435\u0448\u0435\u043d\u0438\u0438 \u0441\u043e \u0441\u0442\u0430\u043d\u0434\u0430\u0440\u0442\u043d\u044b\u043c\u0438 \u043f\u043e\u0434\u0441\u0438\u0441\u0442\u0435\u043c\u0430\u043c\u0438 -> read. Pure BSL, existing form element properties, platform-only exchange -> answer without opening this skill; platform-only exclusion applies only without BSP API review. References verify BSP 3.1.11; other versions need matching sources."
+description: "\u0411\u0421\u041f / \u0431\u0438\u0431\u043b\u0438\u043e\u0442\u0435\u0447\u043d\u0430\u044f \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u0446\u0438\u044f 1\u0421. Scope before opening: Read base-common.md for an error message next to a form field and \u041e\u0442\u043a\u0430\u0437 when standard subsystems are used. Changing only an existing form element property (caption, visibility) is a platform task: answer without opening this skill. Explicit BSP API review, including method existence, overrides that exclusion. In standard subsystems, exported common module \u0412\u044b\u0437\u043e\u0432\u0421\u0435\u0440\u0432\u0435\u0440\u0430 / \u0421\u043b\u0443\u0436\u0435\u0431\u043d\u044b\u0439\u041f\u0440\u043e\u0433\u0440\u0430\u043c\u043c\u043d\u044b\u0439\u0418\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441 stability or client/server execution -> fundamentals.md. A migration/update handler saving via a library without business logic/exchange registration -> update.md even without a BSP name or version. Pure BSL or platform-only exchange -> skip. References verify BSP 3.1.11 only."
 ---
 
 # Using 1C:BSP 3.1.11 in application code
@@ -56,6 +56,13 @@ an explicit BSP name or version; route it to `update.md` after the version check
 3. If the user proposes a call or rule, check its original full
    `Module.Method` name and purpose. Identify mismatches explicitly. An API
    signature verified for 3.1.11 is not verification for another BSP version.
+   Before recommending new code, check the project's existing integration
+   pattern and reuse it when it fulfills the task. Choose a BSP API when the
+   task needs BSP behavior, a platform API for a platform-only task, and
+   custom code only for an unmet requirement. Prefer the smallest complete
+   solution that preserves access checks, error handling, data integrity and
+   existing callers; a shorter direct call is not a substitute for required
+   library behavior.
 4. Prefer the stable public programmatic-interface region. Internal or
    deprecated APIs require an explicit warning and no public alternative.
    Show overridable-module hooks as implementations: BSP calls them;

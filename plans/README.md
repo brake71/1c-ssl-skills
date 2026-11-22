@@ -1,6 +1,13 @@
 # Планы по скилу БСП
 
-**Действующий план развития:** [после локального кандидата v0.16](bsp-development-after-v0.13.md).
+**Действующий план:** [v0.17 — точность оценки и устойчивость ответов](bsp-v0.17.md).
+Опубликованный [v0.16](https://github.com/brake71/1c-ssl-skills/releases/tag/v0.16)
+проверен на GitHub: скачанные ZIP/tar.gz побайтно совпали с Git-сборкой,
+skill fingerprint совпал с полной native sol-матрицей. Исторический
+[план до публикации](bsp-development-after-v0.13.md) сохранён для ссылок.
+
+## История v0.16 до публикации
+
 Первая activation-партия выполнена: **5/24 references**, 10 сценариев;
 guided 81/81, activation 28/30 individual, все итоговые gates PASS.
 После локального v0.16 в рабочем дереве встроен fixture/resume контроль P0.
@@ -20,8 +27,8 @@ activation/read 24/24 и 21/21, но **forbidden gate FAIL** из-за плат�
 После paired-разбора прогресса и уточнения reference новый **sol** native
 цикл на текущих байтах рабочего дерева завершён: activation **11/11 · 32/33**,
 guided после resume только инфраструктурных слотов **27/27 · 80/81**, все
-quality/fixture/isolation gates PASS. Два individual FAIL сохранены; релизный
-на момент P5 архив ещё не был проверен, публикации не было.
+quality/fixture/isolation gates PASS. Два individual FAIL сохранены; на момент P5 архив ещё не был проверен,
+публикации не было.
 [Первая targeted-проверка](../reports/bsp-skills/p1-progress-activation-followup.md) ·
 [первая полная матрица](../reports/bsp-skills/p1-full-native-3x-followup.md) ·
 [paired исправления](../reports/bsp-skills/p2-wording-and-context-followup.md) ·
@@ -30,7 +37,7 @@ quality/fixture/isolation gates PASS. Два individual FAIL сохранены;
 [диагностика platform-only и другого профиля](../reports/bsp-skills/p4-platform-only-model-diagnosis.md) ·
 [текущая sol-матрица и resume](../reports/bsp-skills/p5-sol-full-matrix-after-limit-recovery.md).
 
-Основание текущего состояния: [локальная проверка v0.16](../reports/bsp-skills/v0.16-release-candidate-readiness.md).
+Историческое основание: [локальная проверка раннего кандидата v0.16](../reports/bsp-skills/v0.16-release-candidate-readiness.md).
 На момент локального отчёта тег/push/публикация v0.16 не выполнялись. [Кандидат v0.15](../reports/bsp-skills/7b1abc7-release-candidate-readiness.md)
 остаётся историческим evidence; эти локальные отчёты не доказывают
 публикацию GitHub Release или скачанных release assets.

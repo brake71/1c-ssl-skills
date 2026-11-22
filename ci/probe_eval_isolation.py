@@ -465,7 +465,7 @@ def main() -> None:
     parser.add_argument("--output", required=True, help="New report path outside consumer root")
     parser.add_argument("--skill", default=str(evals.DEFAULT_SKILL))
     parser.add_argument("--cdx", default="cdx")
-    parser.add_argument("--model", default=evals.DEFAULT_MODEL)
+    parser.add_argument("--model", default=evals.DEFAULT_MODEL, choices=(evals.DEFAULT_MODEL,))
     parser.add_argument("--reasoning-effort", choices=("low", "medium", "high", "xhigh"))
     parser.add_argument("--timeout", type=int, default=60, help="Seconds per native RPC request")
     args = parser.parse_args()

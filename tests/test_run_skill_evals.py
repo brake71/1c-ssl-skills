@@ -623,13 +623,21 @@ class CdxCommandTests(unittest.TestCase):
 
     def test_luna_is_the_default_eval_model(self):
         args = runner.build_parser().parse_args([])
-        self.assertEqual(args.model, "gpt-5.6-luna")
+        self.assertEqual(args.model, "gpt-6-luna")
+        self.assertEqual(runner.build_parser().parse_args(["--model", "gpt-6-luna"]).model, args.model)
         command = runner.build_cdx_command(
             "cdx", self.case, Path("/work"), args.model, None,
             platform_name="posix",
         )
         model_index = command.index("--model")
-        self.assertEqual(command[model_index + 1], "gpt-5.6-luna")
+        self.assertEqual(command[model_index + 1], "gpt-6-luna")
+
+    def test_eval_cli_rejects_other_models(self):
+        for model in ("gpt-6-sol", "gpt-5.6-luna"):
+            with self.subTest(model=model), patch("sys.stderr"):
+                with self.assertRaises(SystemExit) as caught:
+                    runner.build_parser().parse_args(["--model", model])
+                self.assertEqual(caught.exception.code, 2)
 
 
 class ResponseScoringTests(unittest.TestCase):
@@ -1246,6 +1254,35 @@ class CorpusCriteriaTests(unittest.TestCase):
                                          "ДанныеФайла <> Неопределено"), {}
         )["passed"])
 
+    def test_attached_file_guard_binds_return_value_to_write_in_one_fence(self):
+        case = self.case("save-attached-file-public-boundary")
+        prefix = "Служебный метод не следует вызывать: нужен публичный API.\n"
+        code = '''```bsl
+Функция Сохранить(Файл, Путь)
+    Данные = РаботаСФайлами.ДвоичныеДанныеФайла(Файл, Ложь);
+    Если Данные = Неопределено Тогда
+        Возврат Ложь;
+    КонецЕсли;
+    Данные.Записать(Путь);
+    Возврат Истина;
+КонецФункции
+```'''
+        self.assertTrue(runner.score_response(case, prefix + code, {})["passed"])
+        typed = code.replace("Данные = Неопределено", 'ТипЗнч(Данные) <> Тип("ДвоичныеДанные")')
+        self.assertTrue(runner.score_response(case, prefix + typed, {})["passed"])
+        for wrong in (
+            code.replace("Если Данные = Неопределено", "Если ДругиеДанные = Неопределено"),
+            code.replace("Если Данные = Неопределено", "Если Данные <> Неопределено"),
+            code.replace("Данные.Записать(Путь)", "ДругиеДанные.Записать(Путь)"),
+            code.replace("ДвоичныеДанныеФайла(Файл, Ложь)", "ДвоичныеДанныеФайла(Файл, Истина)"),
+            code.replace("    Если Данные = Неопределено Тогда\n        Возврат Ложь;\n    КонецЕсли;", ""),
+            typed.replace('Тип("ДвоичныеДанные")', 'Тип("Строка")'),
+        ):
+            with self.subTest(wrong=wrong[:100]):
+                self.assertFalse(runner.score_response(case, prefix + wrong, {})["passed"])
+        split = code.replace("    Данные.Записать(Путь);", "") + "\n```bsl\nДанные.Записать(Путь);\n```"
+        self.assertFalse(runner.score_response(case, prefix + split, {})["passed"])
+
     def test_safe_write_accepts_equivalent_module_correction(self):
         case = self.case("update-safe-write-module-name")
         response = (
@@ -1260,6 +1297,22 @@ class CorpusCriteriaTests(unittest.TestCase):
             "ОбновлениеИнформационнойБазы.ЗаписатьОбъект(ДокументОбъект, Ложь, Ложь);\n```"
         )
         self.assertTrue(runner.score_response(case, alternative, {})["passed"])
+
+    def test_safe_write_accepts_named_module_absence_but_not_unrelated_absence(self):
+        case = self.case("update-safe-write-module-name")
+        code = "```bsl\nОбновлениеИнформационнойБазы.ЗаписатьДанные(ДокументОбъект, Ложь);\n```"
+        good = "В БСП модуля `ОбновлениеИнформационнойБазыСервер` нет.\n" + code
+        self.assertTrue(runner.score_response(case, good, {})["passed"])
+        for wrong in (
+            good.replace("модуля `ОбновлениеИнформационнойБазыСервер` нет",
+                         "модуль `ОбновлениеИнформационнойБазыСервер` существует"),
+            good.replace("модуля `ОбновлениеИнформационнойБазыСервер` нет",
+                         "модуля `ДругойМодуль` нет; `ОбновлениеИнформационнойБазыСервер` есть"),
+            good.replace("ОбновлениеИнформационнойБазы.ЗаписатьДанные(ДокументОбъект, Ложь)",
+                         "ОбновлениеИнформационнойБазыСервер.ЗаписатьДанные(ДокументОбъект, Ложь)"),
+        ):
+            with self.subTest(wrong=wrong[:100]):
+                self.assertFalse(runner.score_response(case, wrong, {})["passed"])
 
     def test_safe_write_requires_executable_call_with_safe_flags(self):
         case = self.case("update-safe-write-module-name")
@@ -1783,12 +1836,34 @@ class ExecutionStatusTests(unittest.TestCase):
 
 
 class SummaryTests(unittest.TestCase):
+    def test_green_gate_counts_each_false_activation_despite_passing_majority(self):
+        cases = [case for case in runner.load_cases(REPO_ROOT / "evals" / "activation-cases.json")
+                 if case.id in {"neutral-form-caption", "neutral-message-near-field"}]
+
+        def run(activated, passed=True, status="completed"):
+            return {
+                "skill_activated": activated, "expected_reference_read": activated,
+                "status": status, "returncode": 0, "usage": {},
+                "score": {"passed": passed, "invalid_methods": [], "unsafe_calls": [], "forbidden_hits": []},
+            }
+
+        for status, expected in (("quality_failed", 1), ("infrastructure_failed", 0)):
+            with self.subTest(status=status):
+                matrix = [[run(True)] * 3 if case.should_trigger else
+                          [run(False), run(True, False, status), run(False)] for case in cases]
+                summary = runner.summarize_phase(runner.phase_case_records(cases, matrix, 3))
+                self.assertEqual(summary["pass_rate"], 1.0)
+                self.assertEqual(summary["false_activation_runs"], expected)
+                reasons = runner.green_gate_reasons(summary, 0.8, 0.8)
+                self.assertEqual(reasons, ["false_activation_runs must be 0, got 1"] if expected else [])
+
     def test_green_gate_requires_all_scoped_references_to_be_read(self):
         summary = {
             "pass_rate": 1.0,
             "activation_rate": 1.0,
             "reference_cases": 2,
             "reference_read_rate": 0.5,
+            "false_activation_runs": 0,
             "invalid_methods": 0,
             "unsafe_calls": 0,
             "forbidden_hits": 0,

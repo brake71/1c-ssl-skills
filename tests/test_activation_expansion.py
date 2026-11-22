@@ -182,6 +182,36 @@ class ActivationExpansionTests(unittest.TestCase):
             with self.subTest(wrong=wrong[:120]):
                 self.assertFalse(self.score("neutral-background-progress", wrong)["passed"])
 
+    def test_progress_accepts_adjacent_server_function_labels_with_real_context(self):
+        response = ("Для БСП 3.1.11 внутри уже выполняемой серверной функции "
+                    "сообщайте процент после обработки очередной порции:\n\n"
+                    "```bsl\nДлительныеОперации.СообщитьПрогресс(50, \"Готово\");\n```\n\n"
+                    "В форме:\n```bsl\n&НаКлиенте\nПроцедура Ожидать()\n"
+                    "    ПараметрыОжидания = ДлительныеОперацииКлиент.ПараметрыОжидания(ЭтотОбъект);\n"
+                    "    ПараметрыОжидания.ВыводитьПрогрессВыполнения = Истина;\n"
+                    "    ДлительныеОперацииКлиент.ОжидатьЗавершение(Операция, Неопределено, ПараметрыОжидания);\n"
+                    "КонецПроцедуры\n```")
+        self.assertTrue(self.score("neutral-background-progress", response)["passed"])
+        alternative = response.replace(
+            "внутри уже выполняемой серверной функции сообщайте процент после обработки очередной порции:",
+            "добавьте в **тело уже выполняемой серверной функции** сообщение о ходе работы:")
+        self.assertTrue(self.score("neutral-background-progress", alternative)["passed"])
+        background_label = response.replace(
+            "внутри уже выполняемой серверной функции сообщайте процент после обработки очередной порции:",
+            "внутри серверной функции, которую выполняет длительная операция:")
+        self.assertTrue(self.score("neutral-background-progress", background_label)["passed"])
+        for wrong in (
+            response.replace("внутри уже выполняемой серверной функции", "внутри клиентской функции"),
+            background_label.replace("серверной функции", "клиентской функции"),
+            background_label.replace("ДлительныеОперации.СообщитьПрогресс", "ДлительныеОперацииКлиент.СообщитьПрогресс"),
+            response.replace("&НаКлиенте", "&НаСервере"),
+            response.replace("ВыводитьПрогрессВыполнения = Истина", "ВыводитьПрогрессВыполнения = Ложь"),
+            response.replace("ДлительныеОперации.СообщитьПрогресс", "ДлительныеОперацииКлиент.СообщитьПрогресс"),
+            response.replace("```bsl\nДлительныеОперации.СообщитьПрогресс", "```bsl\n&НаКлиенте\nДлительныеОперации.СообщитьПрогресс"),
+        ):
+            with self.subTest(wrong=wrong[:110]):
+                self.assertFalse(self.score("neutral-background-progress", wrong)["passed"])
+
     def test_two_topic_refusal_requires_rls_field_binding_and_refusal_effect(self):
         case = "neutral-rls-field-message"
         response = ANSWERS[case]

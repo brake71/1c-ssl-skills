@@ -145,6 +145,7 @@ class NativeTransportTests(unittest.TestCase):
 
     def test_same_process_inventory_is_attached_to_execution(self):
         snapshot = self.snapshot()
+        snapshot["thread_profile"]["model"] = runner.DEFAULT_MODEL
         thread = {"thread": {"id": "thread-1"}}
         client = FakeClient([completed_turn([{
             "id": "answer", "type": "agentMessage", "text": "ACCESS_PRIVATE_SECRET answer",
@@ -154,7 +155,7 @@ class NativeTransportTests(unittest.TestCase):
                 patch.object(native.probe, "initialize_native", return_value={}), \
                 patch.object(native.probe, "capture_snapshot", side_effect=[(copy.deepcopy(snapshot), thread), (copy.deepcopy(snapshot), thread)]) as capture:
             execution = native.run_native("unused", case, self.root, self.root, "red", 1,
-                                          "model", "medium", 1, "bsp", self.root, "source", native.auth_identity(self.auth))
+                                          runner.DEFAULT_MODEL, "medium", 1, "bsp", self.root, "source", native.auth_identity(self.auth))
         self.assertEqual(capture.call_args_list[0].args[0], client)
         self.assertEqual(capture.call_args_list[1].args[0], client)
         self.assertEqual(capture.call_args_list[1].kwargs["thread"], thread)
@@ -165,6 +166,21 @@ class NativeTransportTests(unittest.TestCase):
         self.assertNotIn("ACCESS_PRIVATE_SECRET", json.dumps(execution))
         for artifact in self.root.glob("fixture.*"):
             self.assertNotIn("ACCESS_PRIVATE_SECRET", artifact.read_text(encoding="utf-8"))
+
+    def test_native_rejects_model_mismatch_before_turn(self):
+        snapshot = self.snapshot()
+        snapshot["thread_profile"]["model"] = "gpt-6-sol"
+        client = FakeClient([])
+        case = runner.EvalCase("fixture", "Task", None, False, False, (), (), ())
+        with patch.object(native.probe, "NativeClient", return_value=client), \
+                patch.object(native.probe, "initialize_native", return_value={}), \
+                patch.object(native.probe, "capture_snapshot", return_value=(snapshot, {})):
+            execution = native.run_native("unused", case, self.root, self.root, "red", 1,
+                                          runner.DEFAULT_MODEL, "medium", 1, "bsp", self.root,
+                                          "source", native.auth_identity(self.auth))
+        self.assertEqual([method for method, _ in client.requests], ["account/read"])
+        self.assertIn("Native runtime did not select gpt-6-luna", execution["native_isolation_reasons"])
+        self.assertEqual(runner.infrastructure_reason(execution), "native_isolation")
 
     def test_rpc_error_detail_is_redacted_before_artifacts(self):
         client = FakeClient([])
@@ -261,7 +277,7 @@ class NativeTransportTests(unittest.TestCase):
             "native_helper_sha256": runner.file_sha256(Path(native.__file__)),
             "native_probe_sha256": runner.file_sha256(Path(native.probe.__file__)),
             "auth_identity_sha256": native.auth_identity(self.auth),
-            "model": "model", "reasoning_effort": "medium", "skill": str(runner.DEFAULT_SKILL),
+            "model": runner.DEFAULT_MODEL, "reasoning_effort": "medium", "skill": str(runner.DEFAULT_SKILL),
             "workdir": str(workdir), "bsl_src": None, "selected_cases": [case_id],
             "corpus_sha256": runner.file_sha256(runner.DEFAULT_CASES),
             "reference_matrix_sha256": runner.file_sha256(runner.DEFAULT_REFERENCE_MATRIX),
@@ -282,7 +298,7 @@ class NativeTransportTests(unittest.TestCase):
             yield self.root
         arguments = ["runner", "--transport", "native", "--dir", str(workdir), "--case", case_id,
                      "--bsl-src", "", "--auth-file", str(self.root / "auth.json"), "--runs", "1",
-                     "--model", "model", "--reasoning-effort", "medium", "--output", str(output), "--resume"]
+                     "--reasoning-effort", "medium", "--output", str(output), "--resume"]
         order = []
         warmup = self.snapshot()
         warmup.update(auth_identity_sha256=native.auth_identity(self.auth), native_account_sha256="account")

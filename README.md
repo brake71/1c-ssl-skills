@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.
 Чтобы установить конкретный тег или коммит, передайте `--ref`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.16
+curl -fsSL https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.sh | bash -s -- --ref v0.17
 ```
 
 Если не хочется выполнять загруженный код через pipe, сначала сохраните и
@@ -59,7 +59,7 @@ irm https://raw.githubusercontent.com/brake71/1c-ssl-skills/main/install.ps1 -Ou
 .\install.ps1 -Agent Codex
 .\install.ps1 -Agent OpenCode
 .\install.ps1 -Target C:\path\to\skills
-.\install.ps1 -Agent Codex -Ref v0.16
+.\install.ps1 -Agent Codex -Ref v0.17
 Remove-Item .\install.ps1
 ```
 
@@ -141,13 +141,16 @@ reference-файлы остаются пригодны для использов
 python -m unittest discover -s tests -v
 python ci/validate_key_methods.py --coverage-only
 python ci/validate_key_methods.py --src src/cf
+python ci/check_critical_examples.py
 python ci/run_skill_evals.py --dry-run
 ```
 
 CI также проверяет компиляцию скриптов, обязательность `--src`, покрытие
-references и локальные smoke-тесты обоих установщиков. Полная семантическая
-проверка требует локальную выгрузку БСП и поэтому выполняется перед релизом
-локально.
+references и локальные smoke-тесты обоих установщиков. Проверка
+`check_critical_examples.py` отдельно контролирует код четырёх рискованных
+BSL-примеров (RLS, обновление, файлы, прогресс); это проверка конкретных
+контрактов, а не компиляция модулей 1С. Полная семантическая проверка API
+требует локальную выгрузку БСП и поэтому выполняется перед релизом локально.
 
 ### Релизный кандидат без публикации
 
@@ -157,7 +160,7 @@ Windows, незакоммиченные изменения и Python cache не 
 подготовленное Git-дерево через `--ref`. Тег и сеть для сборки не нужны:
 
 ```bash
-python ci/build_release.py --ref HEAD --version v0.16 --output-dir .tmp/v0.16-candidate
+python ci/build_release.py --ref HEAD --version v0.17 --output-dir .tmp/v0.17-candidate
 ```
 
 Выходной каталог должен быть новым. В нём — ZIP, tar.gz, распакованный
@@ -241,18 +244,18 @@ Fingerprint скила вычисляется по точным байтам и 
 число повторов, фазы и пороги; сохраняет уже завершённые качественные результаты
 и повторяет только отсутствующие, незавершённые или инфраструктурно упавшие
 запуски. Отчёт атомарно обновляется после каждого `case × phase × run`.
-Текущая схема отчёта — v6: отчёты v5 и более ранние нельзя возобновлять
-с новой семантикой чтения нескольких references. Исторические релизные
-результаты остаются неизменными.
+Текущая схема отчёта — v7. Исторические релизные результаты не пересчитываются.
+GREEN gate требует `false_activation_runs=0`: даже одно открытие скила
+в сценарии с `should_trigger: false` проваливает проверку, независимо от большинства.
 Инфраструктурные причины (`quota/rate limit`, authentication, network, timeout,
 недоступная модель, sandbox policy и повреждённая кодировка tool output)
 отделены от ошибок качества ответа.
 
 `--jobs` задаёт предельное число одновременных запусков `cdx`; значение `6`
 сокращает длительность полного прогона, не меняя число повторов и пороги.
-Модель по умолчанию — `gpt-5.6-luna`. Для проверки v0.14 использовался
-явный `--model gpt-6-luna --reasoning-effort medium`, как в командах выше.
-Результаты разных моделей хранятся раздельно и не объединяются в один gate.
+Все новые поведенческие прогоны (`exec` и `native`) используют `gpt-6-luna`.
+Флаг `--model` можно опустить; другое значение скрипт отклонит. Отчёты прежних
+моделей остаются историческими: для Luna нужен новый отчёт, не `--resume`.
 
 По умолчанию RED и GREEN выполняются в каталоге разработчика `src/`.
 Для проверки потребительского проекта используйте `--dir PATH`: исходников

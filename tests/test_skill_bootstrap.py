@@ -18,7 +18,14 @@ class SkillBootstrapTests(unittest.TestCase):
                     "СлужебныйПрограммныйИнтерфейс", "fundamentals.md"):
             with self.subTest(cue=cue):
                 self.assertIn(cue, description)
-        self.assertIn("platform-only exchange", description)
+        self.assertIn("platform-only exchange -> skip", description)
+
+    def test_router_chooses_the_smallest_complete_integration(self):
+        router = (SKILL / "SKILL.md").read_text(encoding="ascii")
+        for cue in ("existing integration", "BSP behavior", "platform-only task",
+                    "custom code only", "access checks", "data integrity"):
+            with self.subTest(cue=cue):
+                self.assertIn(cue, router)
 
     def test_router_routes_to_every_shipped_reference(self):
         router = (SKILL / "SKILL.md").read_text(encoding="ascii")
